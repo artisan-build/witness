@@ -27,6 +27,8 @@ use LogicException;
  * @property string $prev_hash
  * @property string $hash
  * @property CarbonImmutable $created_at
+ *
+ * @mixin IdeHelperAuditEvent
  */
 class AuditEvent extends Model
 {

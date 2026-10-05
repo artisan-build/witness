@@ -27,7 +27,7 @@ it('freezes document and field mutations after send', function (): void {
     $team = Team::factory()->create();
     $sender = UserFactory::new()->create();
     $team->users()->attach($sender);
-    $envelope = app(CreateDraftEnvelope::class)->handle(
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
         team: $team,
         sender: $sender,
         title: 'Freeze test',
@@ -42,7 +42,7 @@ it('freezes document and field mutations after send', function (): void {
     ]);
     $field = Field::factory()->forSigner($signer)->create();
 
-    app(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
 
     expect(fn () => $envelope->document->update(['original_name' => 'changed.pdf']))
         ->toThrow(DomainException::class, 'Documents cannot be changed')
@@ -64,7 +64,7 @@ it('requires explicit distinct-team scoping for envelopes and templates', functi
     $teamA->users()->attach($senderA);
     $teamB->users()->attach($senderB);
 
-    $envelopeA = app(CreateDraftEnvelope::class)->handle(
+    $envelopeA = resolve(CreateDraftEnvelope::class)->handle(
         $teamA,
         $senderA,
         'Team A envelope',
@@ -74,7 +74,7 @@ it('requires explicit distinct-team scoping for envelopes and templates', functi
         1,
         hash('sha256', 'team A document'),
     );
-    $envelopeB = app(CreateDraftEnvelope::class)->handle(
+    $envelopeB = resolve(CreateDraftEnvelope::class)->handle(
         $teamB,
         $senderB,
         'Team B envelope',

@@ -24640,6 +24640,178 @@ namespace Illuminate\Support\Facades {
             }
     }
 
+namespace Thunk\Verbs\Facades {
+    /**
+     */
+    class Verbs {
+        /**
+         * @static
+         */
+        public static function fireIfValid($event)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->fireIfValid($event);
+        }
+
+        /**
+         * @static
+         */
+        public static function fire($event)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->fire($event);
+        }
+
+        /**
+         * @static
+         */
+        public static function commit()
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->commit();
+        }
+
+        /**
+         * @static
+         */
+        public static function replay($beforeEach = null, $afterEach = null)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->replay($beforeEach, $afterEach);
+        }
+
+        /**
+         * @static
+         */
+        public static function listen($listener)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->listen($listener);
+        }
+
+        /**
+         * @static
+         */
+        public static function commitImmediately($commit_immediately = true)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->commitImmediately($commit_immediately);
+        }
+
+        /**
+         * @static
+         */
+        public static function skipPhases(...$phases)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->skipPhases(...$phases);
+        }
+
+        /**
+         * @deprecated
+         * @see IdManager
+         * @see Id
+         * @static
+         */
+        public static function toId($id)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->toId($id);
+        }
+
+        /**
+         * @static
+         */
+        public static function createMetadataUsing($callback = null)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->createMetadataUsing($callback);
+        }
+
+        /**
+         * @static
+         */
+        public static function isAuthorized($event)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->isAuthorized($event);
+        }
+
+        /**
+         * @static
+         */
+        public static function isValid($event)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->isValid($event);
+        }
+
+        /**
+         * @static
+         */
+        public static function isReplaying()
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->isReplaying();
+        }
+
+        /**
+         * @static
+         */
+        public static function unlessReplaying($callback)
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->unlessReplaying($callback);
+        }
+
+        /**
+         * @static
+         */
+        public static function realNow()
+        {
+            /** @var \Thunk\Verbs\Lifecycle\Broker $instance */
+            return $instance->realNow();
+        }
+
+        /**
+         * @static
+         */
+        public static function assertCommitted($event, $callback = null)
+        {
+            /** @var \Thunk\Verbs\Testing\BrokerFake $instance */
+            return $instance->assertCommitted($event, $callback);
+        }
+
+        /**
+         * @static
+         */
+        public static function assertNotCommitted($event, $callback = null)
+        {
+            /** @var \Thunk\Verbs\Testing\BrokerFake $instance */
+            return $instance->assertNotCommitted($event, $callback);
+        }
+
+        /**
+         * @static
+         */
+        public static function assertNothingCommitted()
+        {
+            /** @var \Thunk\Verbs\Testing\BrokerFake $instance */
+            return $instance->assertNothingCommitted();
+        }
+
+        /**
+         * @static
+         */
+        public static function assertCommitCalledTimes($times)
+        {
+            /** @var \Thunk\Verbs\Testing\BrokerFake $instance */
+            return $instance->assertCommitCalledTimes($times);
+        }
+
+            }
+    }
+
 namespace Laravel\Nightwatch\Facades {
     /**
      * @see \Laravel\Nightwatch\Core
@@ -26141,6 +26313,33 @@ namespace Illuminate\Http\Client {
         public static function withClientIdentity()
         {
             return \Illuminate\Http\Client\Factory::withClientIdentity();
+        }
+
+            }
+    }
+
+namespace Illuminate\Database\Schema {
+    /**
+     */
+    class Blueprint {
+        /**
+         * @see \Glhd\Bits\Support\BitsServiceProvider::boot()
+         * @param string $column
+         * @static
+         */
+        public static function snowflake($column)
+        {
+            return \Illuminate\Database\Schema\Blueprint::snowflake($column);
+        }
+
+        /**
+         * @see \Glhd\Bits\Support\BitsServiceProvider::boot()
+         * @param string $column
+         * @static
+         */
+        public static function snowflakeId($column = 'id')
+        {
+            return \Illuminate\Database\Schema\Blueprint::snowflakeId($column);
         }
 
             }
@@ -31516,6 +31715,7 @@ namespace  {
     class Validator extends \Illuminate\Support\Facades\Validator {}
     class View extends \Illuminate\Support\Facades\View {}
     class Vite extends \Illuminate\Support\Facades\Vite {}
+    class Verbs extends \Thunk\Verbs\Facades\Verbs {}
     class Nightwatch extends \Laravel\Nightwatch\Facades\Nightwatch {}
     class Flux extends \Flux\Flux {}
     class Livewire extends \Livewire\Livewire {}

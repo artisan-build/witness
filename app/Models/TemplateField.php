@@ -11,6 +11,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @mixin IdeHelperTemplateField
+ */
 class TemplateField extends Model
 {
     /** @use HasFactory<TemplateFieldFactory> */
@@ -43,9 +46,7 @@ class TemplateField extends Model
     protected static function booted(): void
     {
         static::saving(function (TemplateField $field): void {
-            if ($field->template_id === null) {
-                $field->template_id = TemplateRole::query()->findOrFail($field->template_role_id)->template_id;
-            }
+            $field->template_id ??= TemplateRole::query()->findOrFail($field->template_role_id)->template_id;
 
             $belongs = TemplateRole::query()
                 ->whereKey($field->template_role_id)

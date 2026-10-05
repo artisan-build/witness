@@ -6,12 +6,16 @@ namespace App\Models;
 
 use ArtisanBuild\BuiltForCloud\User;
 use Database\Factories\TemplateFactory;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @mixin IdeHelperTemplate
+ */
 class Template extends Model
 {
     /** @use HasFactory<TemplateFactory> */
@@ -55,7 +59,8 @@ class Template extends Model
     }
 
     /** @param Builder<Template> $query */
-    public function scopeForTeam(Builder $query, Team|int $team): void
+    #[Scope]
+    protected function forTeam(Builder $query, Team|int $team): void
     {
         $query->where('team_id', $team instanceof Team ? $team->getKey() : $team);
     }

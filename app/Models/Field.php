@@ -12,6 +12,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @mixin IdeHelperField
+ */
 class Field extends Model
 {
     /** @use HasFactory<FieldFactory> */
@@ -59,9 +62,7 @@ class Field extends Model
 
     private function setEnvelopeFromSignerIfMissing(): void
     {
-        if ($this->envelope_id === null) {
-            $this->envelope_id = Signer::query()->findOrFail($this->signer_id)->envelope_id;
-        }
+        $this->envelope_id ??= Signer::query()->findOrFail($this->signer_id)->envelope_id;
     }
 
     private function assertDraftEnvelope(bool $includeOriginal = false): void

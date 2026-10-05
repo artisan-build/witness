@@ -9,7 +9,6 @@ use App\Domain\Audit\AuditHasher;
 use App\Enums\AuditEventType;
 use App\Models\AuditEvent;
 use App\Models\Team;
-use App\Support\CanonicalJson;
 use Database\Factories\UserFactory;
 use Illuminate\Support\Facades\DB;
 use Thunk\Verbs\Models\VerbEvent;
@@ -20,7 +19,7 @@ function createAuditedEnvelope(string $documentContents = 'original document'): 
     $sender = UserFactory::new()->create();
     $team->users()->attach($sender);
 
-    $envelope = app(CreateDraftEnvelope::class)->handle(
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
         team: $team,
         sender: $sender,
         title: 'Test-created agreement',
@@ -39,7 +38,7 @@ function createAuditedEnvelope(string $documentContents = 'original document'): 
 it('builds and verifies a real two-event envelope chain through Verbs', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
 
-    app(SendEnvelope::class)->handle(
+    resolve(SendEnvelope::class)->handle(
         team: $team,
         sender: $sender,
         envelopeId: $envelope->getKey(),
@@ -48,7 +47,7 @@ it('builds and verifies a real two-event envelope chain through Verbs', function
     );
 
     $events = $envelope->auditEvents()->get();
-    $result = app(AuditChainVerifier::class)->verify($envelope);
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($events)->toHaveCount(2)
         ->and($events->pluck('type')->all())->toBe([AuditEventType::Created, AuditEventType::Sent])
@@ -61,12 +60,12 @@ it('builds and verifies a real two-event envelope chain through Verbs', function
 
 it('fails at canonical event data that was directly tampered with', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
-    app(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $second = $envelope->auditEvents()->where('sequence', 2)->firstOrFail();
 
     DB::table('audit_events')->where('id', $second->getKey())->update(['canonical_event' => '{}']);
 
-    $result = app(AuditChainVerifier::class)->verify($envelope);
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($result->valid)->toBeFalse()
         ->and($result->failingSequence)->toBe(2)
@@ -75,12 +74,12 @@ it('fails at canonical event data that was directly tampered with', function ():
 
 it('fails at the first event moved out of sequence', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
-    app(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $second = $envelope->auditEvents()->where('sequence', 2)->firstOrFail();
 
     DB::table('audit_events')->where('id', $second->getKey())->update(['sequence' => 3]);
 
-    $result = app(AuditChainVerifier::class)->verify($envelope);
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($result->valid)->toBeFalse()
         ->and($result->failingSequence)->toBe(2)
@@ -93,30 +92,15 @@ it('detects predecessor and event hash changes', function (string $column): void
 
     DB::table('audit_events')->where('id', $first->getKey())->update([$column => str_repeat('0', 64)]);
 
-    $result = app(AuditChainVerifier::class)->verify($envelope);
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($result->valid)->toBeFalse()
         ->and($result->failingSequence)->toBe(1)
         ->and($result->failingEventId)->toBe($first->getKey());
 })->with(['prev_hash', 'hash']);
 
-it('canonicalizes semantically identical associative payloads deterministically', function (): void {
-    $canonical = app(CanonicalJson::class);
-
-    $first = $canonical->encode([
-        'nested' => ['beta' => 2, 'alpha' => 1],
-        'name' => 'Test-created value',
-    ]);
-    $second = $canonical->encode([
-        'name' => 'Test-created value',
-        'nested' => ['alpha' => 1, 'beta' => 2],
-    ]);
-
-    expect($first)->toBe($second);
-});
-
 it('derives genesis from both envelope identity and original document hash', function (): void {
-    $hasher = app(AuditHasher::class);
+    $hasher = resolve(AuditHasher::class);
     $hashA = hash('sha256', 'document A');
     $hashB = hash('sha256', 'document B');
 

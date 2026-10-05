@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\EnvelopeStatus;
 use ArtisanBuild\BuiltForCloud\User;
 use Database\Factories\EnvelopeFactory;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
+/**
+ * @mixin IdeHelperEnvelope
+ */
 class Envelope extends Model
 {
     /** @use HasFactory<EnvelopeFactory> */
@@ -67,7 +71,8 @@ class Envelope extends Model
     }
 
     /** @param Builder<Envelope> $query */
-    public function scopeForTeam(Builder $query, Team|int $team): void
+    #[Scope]
+    protected function forTeam(Builder $query, Team|int $team): void
     {
         $query->where('team_id', $team instanceof Team ? $team->getKey() : $team);
     }
