@@ -16,6 +16,7 @@
         "php": "^8.4",
         "artisan-build/built-for-cloud": "^0.19.8",
         "artisan-build/hone-client": "^1.4",
+        "hirethunk/verbs": "^0.9.0",
         "laravel/chisel": "^0.1.0",
         "laravel/framework": "^13.19",
         "laravel/tinker": "^3.0",

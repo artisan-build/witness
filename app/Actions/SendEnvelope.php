@@ -1,0 +1,64 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Actions;
+
+use App\Enums\AuditActorType;
+use App\Enums\AuditEventType;
+use App\Enums\EnvelopeStatus;
+use App\Events\EnvelopeLifecycleRecorded;
+use App\Models\Envelope;
+use App\Models\Team;
+use ArtisanBuild\BuiltForCloud\User;
+use DomainException;
+use Illuminate\Support\Facades\DB;
+
+final class SendEnvelope
+{
+    public function handle(
+        Team $team,
+        User $sender,
+        int $envelopeId,
+        ?string $ipAddress = null,
+        ?string $userAgent = null,
+    ): Envelope {
+        if (! $team->hasMember($sender)) {
+            throw new DomainException('The sender must belong to the envelope team.');
+        }
+
+        return DB::transaction(function () use ($team, $sender, $envelopeId, $ipAddress, $userAgent): Envelope {
+            $envelope = Envelope::query()
+                ->forTeam($team)
+                ->where('sender_id', $sender->getKey())
+                ->with('document')
+                ->lockForUpdate()
+                ->findOrFail($envelopeId);
+
+            if ($envelope->status !== EnvelopeStatus::Draft) {
+                throw new DomainException('Only a draft envelope can be sent.');
+            }
+
+            if ($envelope->document === null) {
+                throw new DomainException('An envelope requires an original document before send.');
+            }
+
+            $envelope->update([
+                'status' => EnvelopeStatus::Sent,
+                'sent_at' => now(),
+            ]);
+
+            EnvelopeLifecycleRecorded::record(
+                envelope: $envelope,
+                type: AuditEventType::Sent,
+                actorType: AuditActorType::Sender,
+                actorId: (int) $sender->getKey(),
+                ipAddress: $ipAddress,
+                userAgent: $userAgent,
+                payload: ['signer_count' => $envelope->signers()->count()],
+            );
+
+            return $envelope->refresh()->load('document');
+        });
+    }
+}
