@@ -22,8 +22,6 @@ class Template extends Model
     use HasFactory;
 
     protected $fillable = [
-        'team_id',
-        'sender_id',
         'name',
         'title',
         'message',
@@ -33,6 +31,25 @@ class Template extends Model
         'page_count',
         'original_sha256',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Template $template): void {
+            $ownsTemplate = Team::query()
+                ->whereKey($template->team_id)
+                ->whereHas('users', fn (Builder $query) => $query->whereKey($template->sender_id))
+                ->exists();
+
+            if (! $ownsTemplate) {
+                throw new \DomainException('Template sender must belong to its team.');
+            }
+        });
+        static::updating(function (Template $template): void {
+            if ($template->isDirty(['team_id', 'sender_id'])) {
+                throw new \DomainException('Template team and sender are immutable.');
+            }
+        });
+    }
 
     /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo

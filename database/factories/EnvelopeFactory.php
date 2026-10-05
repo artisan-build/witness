@@ -29,7 +29,7 @@ class EnvelopeFactory extends Factory
 
     public function configure(): static
     {
-        return $this->afterCreating(function (Envelope $envelope): void {
+        return $this->afterMaking(function (Envelope $envelope): void {
             $envelope->team->users()->syncWithoutDetaching([$envelope->sender_id]);
         });
     }

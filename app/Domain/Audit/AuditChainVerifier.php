@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Audit;
 
+use App\Enums\AuditEventType;
 use App\Models\AuditEvent;
 use App\Models\Envelope;
 use DomainException;
@@ -29,9 +30,18 @@ final readonly class AuditChainVerifier
 
         $previousHash = $this->hasher->genesis((int) $envelope->getKey(), $document->original_sha256);
         $expectedSequence = 1;
+        $events = $envelope->auditEvents()->get();
+
+        if ($events->isEmpty()) {
+            return AuditVerificationResult::invalid(1, null, 'The envelope has no audit chain.');
+        }
 
         /** @var AuditEvent $event */
-        foreach ($envelope->auditEvents()->get() as $event) {
+        foreach ($events as $event) {
+            if ($expectedSequence === 1 && $event->type !== AuditEventType::Created) {
+                return AuditVerificationResult::invalid(1, (int) $event->getKey(), 'The audit chain must begin with created.');
+            }
+
             if ($event->sequence !== $expectedSequence) {
                 return AuditVerificationResult::invalid(
                     $expectedSequence,
@@ -81,6 +91,26 @@ final readonly class AuditChainVerifier
 
             $previousHash = $event->hash;
             $expectedSequence++;
+        }
+
+        $envelope->refresh();
+        $actualCount = $expectedSequence - 1;
+
+        if ($envelope->audit_event_count !== $actualCount) {
+            return AuditVerificationResult::invalid(
+                $expectedSequence,
+                null,
+                "Expected {$envelope->audit_event_count} audit events, found {$actualCount}.",
+            );
+        }
+
+        if ($envelope->audit_chain_head === null
+            || ! $this->hasher->matches($envelope->audit_chain_head, $previousHash)) {
+            return AuditVerificationResult::invalid(
+                $actualCount,
+                $events->last()->getKey(),
+                'The stored audit head does not match the expected chain head.',
+            );
         }
 
         return AuditVerificationResult::valid($previousHash);

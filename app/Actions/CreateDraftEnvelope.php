@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions;
 
-use App\Enums\AuditActorType;
-use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
-use App\Events\EnvelopeLifecycleRecorded;
 use App\Models\Envelope;
 use App\Models\Team;
 use ArtisanBuild\BuiltForCloud\User;
@@ -49,14 +46,17 @@ final class CreateDraftEnvelope
             $ipAddress,
             $userAgent,
         ): Envelope {
-            $envelope = Envelope::query()->create([
-                'team_id' => $team->getKey(),
-                'sender_id' => $sender->getKey(),
+            $envelope = new Envelope([
                 'title' => $title,
                 'message' => $message,
-                'status' => EnvelopeStatus::Draft,
                 'expires_at' => $expiresAt,
             ]);
+            $envelope->team_id = $team->getKey();
+            $envelope->sender_id = $sender->getKey();
+            $envelope->status = EnvelopeStatus::Draft;
+            $envelope->created_ip_address = $ipAddress;
+            $envelope->created_user_agent = $userAgent;
+            $envelope->save();
 
             $envelope->document()->create([
                 'original_name' => $originalName,
@@ -66,16 +66,6 @@ final class CreateDraftEnvelope
                 'page_count' => $pageCount,
                 'original_sha256' => $originalSha256,
             ]);
-
-            EnvelopeLifecycleRecorded::record(
-                envelope: $envelope,
-                type: AuditEventType::Created,
-                actorType: AuditActorType::Sender,
-                actorId: (int) $sender->getKey(),
-                ipAddress: $ipAddress,
-                userAgent: $userAgent,
-                payload: ['title' => $title],
-            );
 
             return $envelope->refresh()->load('document');
         });

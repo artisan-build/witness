@@ -24,15 +24,29 @@ class Envelope extends Model
     use HasFactory;
 
     protected $fillable = [
-        'team_id',
-        'sender_id',
         'title',
         'message',
-        'status',
         'expires_at',
-        'sent_at',
-        'completed_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Envelope $envelope): void {
+            $ownsEnvelope = Team::query()
+                ->whereKey($envelope->team_id)
+                ->whereHas('users', fn (Builder $query) => $query->whereKey($envelope->sender_id))
+                ->exists();
+
+            if (! $ownsEnvelope) {
+                throw new \DomainException('Envelope sender must belong to its team.');
+            }
+        });
+        static::updating(function (Envelope $envelope): void {
+            if ($envelope->isDirty(['team_id', 'sender_id', 'status'])) {
+                throw new \DomainException('Envelope ownership and status require a domain action.');
+            }
+        });
+    }
 
     /** @return BelongsTo<Team, $this> */
     public function team(): BelongsTo
@@ -84,6 +98,7 @@ class Envelope extends Model
             'expires_at' => 'immutable_datetime',
             'sent_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',
+            'audit_event_count' => 'integer',
         ];
     }
 }

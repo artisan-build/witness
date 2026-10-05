@@ -20,8 +20,6 @@ class TemplateField extends Model
     use HasFactory;
 
     protected $fillable = [
-        'template_id',
-        'template_role_id',
         'page',
         'type',
         'required',
@@ -47,6 +45,10 @@ class TemplateField extends Model
     {
         static::saving(function (TemplateField $field): void {
             $field->template_id ??= TemplateRole::query()->findOrFail($field->template_role_id)->template_id;
+
+            if ($field->exists && $field->isDirty(['template_id', 'template_role_id'])) {
+                throw new DomainException('Template field container identity is immutable.');
+            }
 
             $belongs = TemplateRole::query()
                 ->whereKey($field->template_role_id)

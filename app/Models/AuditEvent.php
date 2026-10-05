@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Database\AppendOnlyBuilder;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Query\Builder;
 use LogicException;
 
 /**
@@ -61,6 +63,15 @@ class AuditEvent extends Model
     public function delete(): ?bool
     {
         throw new LogicException('Audit events are append-only and cannot be deleted.');
+    }
+
+    /**
+     * @param  Builder  $query
+     * @return AppendOnlyBuilder<$this>
+     */
+    public function newEloquentBuilder($query): AppendOnlyBuilder
+    {
+        return new AppendOnlyBuilder($query, $this);
     }
 
     protected function casts(): array

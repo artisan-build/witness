@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\EnvelopeStatus;
 use App\Enums\SignerStatus;
 use Database\Factories\SignerFactory;
+use DomainException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,7 +22,6 @@ class Signer extends Model
     use HasFactory;
 
     protected $fillable = [
-        'envelope_id',
         'name',
         'email',
         'role_label',
@@ -33,6 +34,25 @@ class Signer extends Model
         'viewed_at',
         'signed_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::updating(function (Signer $signer): void {
+            if ($signer->isDirty('envelope_id')) {
+                throw new DomainException('Signer envelope identity is immutable.');
+            }
+        });
+        static::deleting(function (Signer $signer): void {
+            $isFrozen = Envelope::query()
+                ->whereKey($signer->envelope_id)
+                ->where('status', '!=', EnvelopeStatus::Draft->value)
+                ->exists();
+
+            if ($isFrozen) {
+                throw new DomainException('Signers cannot be removed after send.');
+            }
+        });
+    }
 
     /** @return BelongsTo<Envelope, $this> */
     public function envelope(): BelongsTo

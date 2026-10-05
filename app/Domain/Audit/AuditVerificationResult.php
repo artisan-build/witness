@@ -19,7 +19,7 @@ final readonly class AuditVerificationResult
         return new self(true, null, null, null, $chainHead);
     }
 
-    public static function invalid(int $sequence, int $eventId, string $reason): self
+    public static function invalid(int $sequence, ?int $eventId, string $reason): self
     {
         return new self(false, $sequence, $eventId, $reason, null);
     }

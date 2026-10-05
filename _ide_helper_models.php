@@ -29,24 +29,24 @@ namespace App\Models{
  * @property string $hash
  * @property CarbonImmutable $created_at
  * @property-read \App\Models\Envelope $envelope
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent newModelQuery()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent newQuery()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent query()
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereActorId($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereActorType($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereCanonicalEvent($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereCreatedAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereEnvelopeId($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereHash($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereId($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereIpAddress($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereOccurredAt($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent wherePayload($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent wherePrevHash($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereSequence($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereType($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereUserAgent($value)
- * @method static \Illuminate\Database\Eloquent\Builder<static>|AuditEvent whereVerbEventId($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent newModelQuery()
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent newQuery()
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent query()
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereActorId($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereActorType($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereCanonicalEvent($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereCreatedAt($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereEnvelopeId($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereHash($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereId($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereIpAddress($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereOccurredAt($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent wherePayload($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent wherePrevHash($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereSequence($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereType($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereUserAgent($value)
+ * @method static \App\Database\AppendOnlyBuilder<static>|AuditEvent whereVerbEventId($value)
  * @mixin \Eloquent
  */
 	#[\AllowDynamicProperties]
@@ -101,6 +101,10 @@ namespace App\Models{
  * @property \Carbon\CarbonImmutable|null $expires_at
  * @property \Carbon\CarbonImmutable|null $sent_at
  * @property \Carbon\CarbonImmutable|null $completed_at
+ * @property int $audit_event_count
+ * @property string|null $audit_chain_head
+ * @property string|null $created_ip_address
+ * @property string|null $created_user_agent
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\AuditEvent> $auditEvents
@@ -117,8 +121,12 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereAuditChainHead($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereAuditEventCount($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereCompletedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereCreatedIpAddress($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereCreatedUserAgent($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereExpiresAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereMessage($value)

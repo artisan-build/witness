@@ -87,7 +87,8 @@ it('fails at the first event moved out of sequence', function (): void {
 });
 
 it('detects predecessor and event hash changes', function (string $column): void {
-    [, , $envelope] = createAuditedEnvelope();
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $first = $envelope->auditEvents()->firstOrFail();
 
     DB::table('audit_events')->where('id', $first->getKey())->update([$column => str_repeat('0', 64)]);
@@ -109,14 +110,19 @@ it('derives genesis from both envelope identity and original document hash', fun
 });
 
 it('refuses audit event updates and deletes through the application model', function (): void {
-    [, , $envelope] = createAuditedEnvelope();
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $event = $envelope->auditEvents()->firstOrFail();
 
     expect(fn () => $event->update(['user_agent' => 'changed']))
         ->toThrow(LogicException::class, 'append-only')
         ->and(fn () => $event->delete())
         ->toThrow(LogicException::class, 'append-only')
-        ->and(AuditEvent::query()->count())->toBe(1);
+        ->and(fn () => AuditEvent::query()->whereKey($event)->update(['user_agent' => 'changed']))
+        ->toThrow(LogicException::class, 'append-only')
+        ->and(fn () => $envelope->auditEvents()->delete())
+        ->toThrow(LogicException::class, 'append-only')
+        ->and(AuditEvent::query()->count())->toBe(2);
 });
 
 it('defines every PRD audit event type', function (): void {

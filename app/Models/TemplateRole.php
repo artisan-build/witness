@@ -18,7 +18,16 @@ class TemplateRole extends Model
     /** @use HasFactory<TemplateRoleFactory> */
     use HasFactory;
 
-    protected $fillable = ['template_id', 'label', 'position'];
+    protected $fillable = ['label', 'position'];
+
+    protected static function booted(): void
+    {
+        static::updating(function (TemplateRole $role): void {
+            if ($role->isDirty('template_id')) {
+                throw new \DomainException('Template role parent is immutable.');
+            }
+        });
+    }
 
     /** @return BelongsTo<Template, $this> */
     public function template(): BelongsTo

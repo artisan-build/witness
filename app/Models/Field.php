@@ -21,8 +21,6 @@ class Field extends Model
     use HasFactory;
 
     protected $fillable = [
-        'envelope_id',
-        'signer_id',
         'page',
         'type',
         'required',
@@ -54,7 +52,7 @@ class Field extends Model
             $field->assertSignerBelongsToEnvelope();
         });
         static::updating(function (Field $field): void {
-            $field->assertDraftEnvelope(includeOriginal: true);
+            $field->assertUpdateAllowed();
             $field->assertSignerBelongsToEnvelope();
         });
         static::deleting(fn (Field $field) => $field->assertDraftEnvelope());
@@ -65,21 +63,28 @@ class Field extends Model
         $this->envelope_id ??= Signer::query()->findOrFail($this->signer_id)->envelope_id;
     }
 
-    private function assertDraftEnvelope(bool $includeOriginal = false): void
+    private function assertDraftEnvelope(): void
     {
-        $envelopeIds = [(int) $this->envelope_id];
-
-        if ($includeOriginal && $this->isDirty('envelope_id')) {
-            $envelopeIds[] = (int) $this->getOriginal('envelope_id');
-        }
-
         $hasFrozenEnvelope = Envelope::query()
-            ->whereKey(array_unique($envelopeIds))
+            ->whereKey($this->envelope_id)
             ->where('status', '!=', EnvelopeStatus::Draft->value)
             ->exists();
 
         if ($hasFrozenEnvelope) {
             throw new DomainException('Fields cannot be changed after an envelope leaves draft.');
+        }
+    }
+
+    private function assertUpdateAllowed(): void
+    {
+        if ($this->isDirty(['envelope_id', 'signer_id'])) {
+            throw new DomainException('Field container identity is immutable.');
+        }
+
+        $definitionColumns = ['page', 'type', 'required', 'position_x', 'position_y', 'width', 'height'];
+
+        if ($this->isDirty($definitionColumns)) {
+            $this->assertDraftEnvelope();
         }
     }
 

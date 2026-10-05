@@ -32,7 +32,7 @@ class TemplateFactory extends Factory
 
     public function configure(): static
     {
-        return $this->afterCreating(function (Template $template): void {
+        return $this->afterMaking(function (Template $template): void {
             $template->team->users()->syncWithoutDetaching([$template->sender_id]);
         });
     }

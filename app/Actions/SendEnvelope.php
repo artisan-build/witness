@@ -43,10 +43,25 @@ final class SendEnvelope
                 throw new DomainException('An envelope requires an original document before send.');
             }
 
-            $envelope->update([
+            DB::statement("SET LOCAL witness.envelope_transition = 'on'");
+            DB::table('envelopes')->where('id', $envelope->getKey())->update([
                 'status' => EnvelopeStatus::Sent,
                 'sent_at' => now(),
+                'updated_at' => now(),
             ]);
+            DB::statement("SET LOCAL witness.envelope_transition = 'off'");
+            $envelope->refresh()->load('document');
+
+            EnvelopeLifecycleRecorded::record(
+                envelope: $envelope,
+                type: AuditEventType::Created,
+                actorType: AuditActorType::Sender,
+                actorId: (int) $sender->getKey(),
+                ipAddress: $envelope->created_ip_address,
+                userAgent: $envelope->created_user_agent,
+                payload: ['title' => $envelope->title],
+                occurredAt: $envelope->created_at->toImmutable(),
+            );
 
             EnvelopeLifecycleRecorded::record(
                 envelope: $envelope,

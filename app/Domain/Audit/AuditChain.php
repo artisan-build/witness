@@ -4,18 +4,21 @@ declare(strict_types=1);
 
 namespace App\Domain\Audit;
 
+use App\Contracts\AuditAppender;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Models\AuditEvent;
 use App\Models\Envelope;
 use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Thunk\Verbs\Facades\Verbs;
 
-final readonly class AuditChain
+final readonly class AuditChain implements AuditAppender
 {
     public function __construct(
         private AuditCanonicalizer $canonicalizer,
         private AuditHasher $hasher,
+        private LifecyclePolicy $policy,
     ) {}
 
     public function append(EnvelopeLifecycleRecorded $event): AuditEvent
@@ -42,6 +45,9 @@ final readonly class AuditChain
                 throw new DomainException('The lifecycle event document hash does not match its envelope.');
             }
 
+            $this->policy->assertSupported($event->type);
+            $this->policy->assertActor($envelope, $event->actor_type, $event->actor_id);
+
             $previous = AuditEvent::query()
                 ->where('envelope_id', $envelope->getKey())
                 ->orderByDesc('sequence')
@@ -50,6 +56,10 @@ final readonly class AuditChain
             $sequence = ($previous->sequence ?? 0) + 1;
             $previousHash = $previous->hash
                 ?? $this->hasher->genesis((int) $envelope->getKey(), $document->original_sha256);
+
+            if (! Verbs::isReplaying() && $envelope->audit_event_count !== $sequence - 1) {
+                throw new DomainException('The envelope audit anchor is out of sync with its chain.');
+            }
             $occurredAt = CarbonImmutable::parse($event->occurred_at)->utc();
             $canonical = $this->canonicalizer->encode(
                 envelopeId: (int) $envelope->getKey(),
@@ -80,6 +90,13 @@ final readonly class AuditChain
             $auditEvent->hash = $this->hasher->eventHash($previousHash, $canonical);
             $auditEvent->created_at = now();
             $auditEvent->save();
+
+            DB::statement("SET LOCAL witness.audit_append = 'on'");
+            DB::table('envelopes')->where('id', $envelope->getKey())->update([
+                'audit_event_count' => $sequence,
+                'audit_chain_head' => $auditEvent->hash,
+            ]);
+            DB::statement("SET LOCAL witness.audit_append = 'off'");
 
             return $auditEvent;
         });
