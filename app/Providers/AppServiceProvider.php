@@ -2,8 +2,6 @@
 
 namespace App\Providers;
 
-use App\Contracts\AuditAppender;
-use App\Domain\Audit\AuditChain;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -12,15 +10,6 @@ use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    #[\Override]
-    public function register(): void
-    {
-        $this->app->bind(AuditAppender::class, AuditChain::class);
-    }
-
     /**
      * Bootstrap any application services.
      */

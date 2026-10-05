@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Events;
 
-use App\Contracts\AuditAppender;
+use App\Domain\Audit\AuditCanonicalizer;
+use App\Domain\Audit\AuditHasher;
 use App\Domain\Audit\LifecyclePolicy;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
@@ -13,12 +14,14 @@ use App\Models\AuditEvent;
 use App\Models\Envelope;
 use App\States\EnvelopeState;
 use Carbon\CarbonImmutable;
+use DomainException;
 use Illuminate\Support\Facades\DB;
 use LogicException;
-use Throwable;
 use Thunk\Verbs\Attributes\Autodiscovery\StateId;
+use Thunk\Verbs\Attributes\Hooks\Once;
 use Thunk\Verbs\Event;
 use Thunk\Verbs\Lifecycle\StateManager;
+use Thunk\Verbs\Models\VerbEvent;
 use Thunk\Verbs\Support\PendingEvent;
 
 class EnvelopeLifecycleRecorded extends Event
@@ -96,10 +99,8 @@ class EnvelopeLifecycleRecorded extends Event
 
                 return $result;
             });
-        } catch (Throwable $throwable) {
+        } finally {
             resolve(StateManager::class)->reset();
-
-            throw $throwable;
         }
     }
 
@@ -155,8 +156,94 @@ class EnvelopeLifecycleRecorded extends Event
         }
     }
 
-    public function handle(AuditAppender $chain): AuditEvent
-    {
-        return $chain->append($this);
+    #[Once]
+    public function handle(
+        AuditCanonicalizer $canonicalizer,
+        AuditHasher $hasher,
+        LifecyclePolicy $policy,
+    ): AuditEvent {
+        return DB::transaction(function () use ($canonicalizer, $hasher, $policy): AuditEvent {
+            $event = VerbEvent::query()->find($this->id)?->event();
+
+            if (! $event instanceof self) {
+                throw new DomainException('The audit projection requires its persisted lifecycle event.');
+            }
+
+            $existing = AuditEvent::query()->where('verb_event_id', $event->id)->first();
+
+            if ($existing !== null) {
+                return $existing;
+            }
+
+            $envelope = Envelope::query()
+                ->with('document')
+                ->lockForUpdate()
+                ->findOrFail($event->envelope_id);
+
+            $document = $envelope->document;
+
+            if ((int) $envelope->team_id !== $event->team_id || $document === null) {
+                throw new DomainException('The lifecycle event does not match its envelope.');
+            }
+
+            if (! $hasher->matches($document->original_sha256, $event->original_document_sha256)) {
+                throw new DomainException('The lifecycle event document hash does not match its envelope.');
+            }
+
+            $policy->assertRecordable($envelope, $event->type, $event->actor_type, $event->actor_id);
+
+            $previous = AuditEvent::query()
+                ->where('envelope_id', $envelope->getKey())
+                ->orderByDesc('sequence')
+                ->first();
+
+            $sequence = ($previous->sequence ?? 0) + 1;
+            $previousHash = $previous->hash
+                ?? $hasher->genesis((int) $envelope->getKey(), $document->original_sha256);
+
+            if ($envelope->audit_event_count !== $sequence - 1) {
+                throw new DomainException('The envelope audit anchor is out of sync with its chain.');
+            }
+
+            $occurredAt = CarbonImmutable::parse($event->occurred_at)->utc();
+            $canonical = $canonicalizer->encode(
+                envelopeId: (int) $envelope->getKey(),
+                verbEventId: $event->id,
+                sequence: $sequence,
+                type: $event->type,
+                occurredAt: $occurredAt,
+                actorType: $event->actor_type,
+                actorId: $event->actor_id,
+                ipAddress: $event->ip_address,
+                userAgent: $event->user_agent,
+                payload: $event->payload,
+            );
+
+            $auditEvent = new AuditEvent;
+            $auditEvent->envelope_id = $envelope->getKey();
+            $auditEvent->verb_event_id = $event->id;
+            $auditEvent->sequence = $sequence;
+            $auditEvent->type = $event->type;
+            $auditEvent->occurred_at = $occurredAt;
+            $auditEvent->actor_type = $event->actor_type;
+            $auditEvent->actor_id = $event->actor_id;
+            $auditEvent->ip_address = $event->ip_address;
+            $auditEvent->user_agent = $event->user_agent;
+            $auditEvent->payload = $event->payload;
+            $auditEvent->canonical_event = $canonical;
+            $auditEvent->prev_hash = $previousHash;
+            $auditEvent->hash = $hasher->eventHash($previousHash, $canonical);
+            $auditEvent->created_at = now();
+            $auditEvent->save();
+
+            DB::statement("SET LOCAL witness.audit_append = 'on'");
+            DB::table('envelopes')->where('id', $envelope->getKey())->update([
+                'audit_event_count' => $sequence,
+                'audit_chain_head' => $auditEvent->hash,
+            ]);
+            DB::statement("SET LOCAL witness.audit_append = 'off'");
+
+            return $auditEvent;
+        });
     }
 }

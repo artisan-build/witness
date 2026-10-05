@@ -183,6 +183,7 @@ return new class extends Migration
         if (Schema::getConnection()->getDriverName() === 'pgsql') {
             DB::unprepared(<<<'SQL'
                 DROP FUNCTION IF EXISTS witness_guard_envelopes();
+                DROP FUNCTION IF EXISTS witness_guard_audit_events();
                 DROP FUNCTION IF EXISTS witness_guard_documents();
                 DROP FUNCTION IF EXISTS witness_guard_signers();
                 DROP FUNCTION IF EXISTS witness_guard_fields();
@@ -196,6 +197,24 @@ return new class extends Migration
     private function installPostgresGuards(): void
     {
         DB::unprepared(<<<'SQL'
+            CREATE OR REPLACE FUNCTION witness_guard_audit_events() RETURNS trigger AS $$
+            BEGIN
+                IF TG_OP = 'UPDATE' THEN
+                    RAISE EXCEPTION 'Audit events are append-only';
+                END IF;
+
+                IF current_setting('witness.purge_envelope', true) IS DISTINCT FROM OLD.envelope_id::text THEN
+                    RAISE EXCEPTION 'Audit events may only be deleted by their envelope purge';
+                END IF;
+
+                RETURN OLD;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            CREATE TRIGGER witness_audit_events_guard
+            BEFORE UPDATE OR DELETE ON audit_events
+            FOR EACH ROW EXECUTE FUNCTION witness_guard_audit_events();
+
             CREATE OR REPLACE FUNCTION witness_guard_envelopes() RETURNS trigger AS $$
             BEGIN
                 IF TG_OP = 'UPDATE' THEN

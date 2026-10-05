@@ -6,7 +6,6 @@ use App\Actions\CreateDraftEnvelope;
 use App\Actions\SendEnvelope;
 use App\Actions\StoreFinalDocument;
 use App\Actions\UpdateFieldResponse;
-use App\Contracts\AuditAppender;
 use App\Domain\Audit\AuditChainVerifier;
 use App\Domain\Audit\LifecyclePolicy;
 use App\Enums\AuditActorType;
@@ -22,9 +21,9 @@ use App\Models\Template;
 use App\Models\TemplateField;
 use App\Models\TemplateRole;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Thunk\Verbs\Contracts\BrokersEvents;
 use Thunk\Verbs\Models\VerbEvent;
 
 function createSecurityEnvelope(string $contents = 'security document'): array
@@ -214,44 +213,102 @@ it('keeps Verbs and audit projection atomic when projection fails', function ():
     });
     $envelope->refresh();
 
-    app()->bind(AuditAppender::class, static fn (): AuditAppender => new class implements AuditAppender
-    {
-        public function append(EnvelopeLifecycleRecorded $event): AuditEvent
-        {
-            throw new RuntimeException('Forced audit projection failure.');
-        }
-    });
+    DB::unprepared(<<<'SQL'
+        CREATE OR REPLACE FUNCTION witness_test_reject_audit_insert() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'Forced audit projection failure';
+        END;
+        $$ LANGUAGE plpgsql;
 
-    expect(fn () => EnvelopeLifecycleRecorded::record(
-        $envelope,
-        AuditEventType::Created,
-        AuditActorType::Sender,
-        $sender->getKey(),
-    ))->toThrow(RuntimeException::class, 'Forced audit projection failure');
+        CREATE TRIGGER witness_test_reject_audit_insert
+        BEFORE INSERT ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION witness_test_reject_audit_insert();
+        SQL);
+
+    try {
+        expect(fn () => EnvelopeLifecycleRecorded::record(
+            $envelope,
+            AuditEventType::Created,
+            AuditActorType::Sender,
+            $sender->getKey(),
+        ))->toThrow(QueryException::class, 'Forced audit projection failure');
+    } finally {
+        DB::unprepared(<<<'SQL'
+            DROP TRIGGER IF EXISTS witness_test_reject_audit_insert ON audit_events;
+            DROP FUNCTION IF EXISTS witness_test_reject_audit_insert();
+            SQL);
+    }
 
     expect(VerbEvent::query()->count())->toBe(0)
         ->and(AuditEvent::query()->count())->toBe(0)
         ->and($envelope->fresh()->audit_event_count)->toBe(0);
 });
 
-it('rebuilds an empty audit projection idempotently from Verbs', function (): void {
+it('reloads the first uncommitted event before a normal send records the second', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+    $stateReloads = 0;
+
+    DB::listen(function (QueryExecuted $query) use (&$stateReloads): void {
+        if (str_contains($query->sql, 'verb_state_events')) {
+            $stateReloads++;
+        }
+    });
+
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect($stateReloads)->toBeGreaterThanOrEqual(2)
+        ->and(VerbEvent::query()->count())->toBe(2)
+        ->and(AuditEvent::query()->count())->toBe(2);
+});
+
+it('retries a send in the same process after its outer transaction rolls back', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+
+    DB::beginTransaction();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect(VerbEvent::query()->count())->toBe(2)
+        ->and(AuditEvent::query()->count())->toBe(2);
+
+    DB::rollBack();
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
+        ->and(VerbEvent::query()->count())->toBe(0)
+        ->and(AuditEvent::query()->count())->toBe(0);
+
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and(VerbEvent::query()->count())->toBe(2)
+        ->and(AuditEvent::query()->count())->toBe(2);
+});
+
+it('rejects forwarded audit update and unscoped delete paths in PostgreSQL', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
-    DB::table('audit_events')->delete();
+    $event = $envelope->auditEvents()->firstOrFail();
 
-    resolve(BrokersEvents::class)->replay();
+    expect(fn () => DB::transaction(fn () => AuditEvent::query()->updateOrInsert(
+        ['id' => $event->getKey()],
+        ['user_agent' => 'mutated'],
+    )))->toThrow(QueryException::class, 'append-only')
+        ->and(fn () => DB::transaction(
+            fn () => AuditEvent::query()->whereKey($event)->toBase()->delete(),
+        ))->toThrow(QueryException::class, 'envelope purge')
+        ->and(fn () => DB::transaction(function () use ($envelope, $event): void {
+            DB::statement("SELECT set_config('witness.purge_envelope', ?, true)", [
+                (string) ((int) $envelope->getKey() + 1),
+            ]);
+            AuditEvent::query()->whereKey($event)->toBase()->delete();
+        }))->toThrow(QueryException::class, 'envelope purge');
 
-    expect($envelope->auditEvents()->count())->toBe(2)
-        ->and(resolve(AuditChainVerifier::class)->verify($envelope)->valid)->toBeTrue();
-
-    resolve(BrokersEvents::class)->replay();
-
-    expect($envelope->auditEvents()->count())->toBe(2);
+    expect(AuditEvent::query()->count())->toBe(2);
 });
 
 it('detects empty and tail-truncated chains against envelope anchors', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    DB::statement("SELECT set_config('witness.purge_envelope', ?, true)", [(string) $envelope->getKey()]);
     DB::table('audit_events')->where('envelope_id', $envelope->getKey())->where('sequence', 2)->delete();
 
     $tailResult = resolve(AuditChainVerifier::class)->verify($envelope);

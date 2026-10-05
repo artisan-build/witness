@@ -35,6 +35,17 @@ function createAuditedEnvelope(string $documentContents = 'original document'): 
     return [$team, $sender, $envelope];
 }
 
+function tamperWithAuditEvents(Closure $callback): mixed
+{
+    DB::statement('ALTER TABLE audit_events DISABLE TRIGGER witness_audit_events_guard');
+
+    try {
+        return $callback();
+    } finally {
+        DB::statement('ALTER TABLE audit_events ENABLE TRIGGER witness_audit_events_guard');
+    }
+}
+
 it('builds and verifies a real two-event envelope chain through Verbs', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
 
@@ -63,7 +74,9 @@ it('fails at canonical event data that was directly tampered with', function ():
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $second = $envelope->auditEvents()->where('sequence', 2)->firstOrFail();
 
-    DB::table('audit_events')->where('id', $second->getKey())->update(['canonical_event' => '{}']);
+    tamperWithAuditEvents(
+        fn () => DB::table('audit_events')->where('id', $second->getKey())->update(['canonical_event' => '{}']),
+    );
 
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
@@ -77,7 +90,9 @@ it('fails at the first event moved out of sequence', function (): void {
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $second = $envelope->auditEvents()->where('sequence', 2)->firstOrFail();
 
-    DB::table('audit_events')->where('id', $second->getKey())->update(['sequence' => 3]);
+    tamperWithAuditEvents(
+        fn () => DB::table('audit_events')->where('id', $second->getKey())->update(['sequence' => 3]),
+    );
 
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
@@ -91,7 +106,11 @@ it('detects predecessor and event hash changes', function (string $column): void
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $first = $envelope->auditEvents()->firstOrFail();
 
-    DB::table('audit_events')->where('id', $first->getKey())->update([$column => str_repeat('0', 64)]);
+    tamperWithAuditEvents(
+        fn () => DB::table('audit_events')->where('id', $first->getKey())->update([
+            $column => str_repeat('0', 64),
+        ]),
+    );
 
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 

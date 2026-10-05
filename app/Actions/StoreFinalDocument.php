@@ -15,22 +15,24 @@ final class StoreFinalDocument
     public function handle(Envelope $envelope, string $storagePath, string $sha256): Document
     {
         return DB::transaction(function () use ($envelope, $storagePath, $sha256): Document {
-            $lockedEnvelope = Envelope::query()
-                ->with('document')
+            $document = Document::query()
+                ->where('envelope_id', $envelope->getKey())
                 ->lockForUpdate()
-                ->findOrFail($envelope->getKey());
+                ->firstOrFail();
+            $lockedEnvelope = Envelope::query()->lockForUpdate()->findOrFail($envelope->getKey());
 
-            if ($lockedEnvelope->status !== EnvelopeStatus::Sent || $lockedEnvelope->document === null) {
+            if ($lockedEnvelope->status !== EnvelopeStatus::Sent
+                || (int) $document->envelope_id !== (int) $lockedEnvelope->getKey()) {
                 throw new DomainException('A final document can only be stored for a sent envelope.');
             }
 
             DB::statement("SET LOCAL witness.final_document_write = 'on'");
-            $lockedEnvelope->document->final_storage_path = $storagePath;
-            $lockedEnvelope->document->final_sha256 = $sha256;
-            $lockedEnvelope->document->save();
+            $document->final_storage_path = $storagePath;
+            $document->final_sha256 = $sha256;
+            $document->save();
             DB::statement("SET LOCAL witness.final_document_write = 'off'");
 
-            return $lockedEnvelope->document->refresh();
+            return $document->refresh();
         });
     }
 }
