@@ -44,6 +44,9 @@ final readonly class RotateSigningInvitation
                 ->latest('generation')
                 ->lockForUpdate()
                 ->first();
+            if ($latest !== null) {
+                $latest = $this->mailDelivery->markStaleClaimUnknown($latest);
+            }
 
             if ($envelope->status !== EnvelopeStatus::Sent || $latest?->status !== MailDeliveryStatus::Unknown) {
                 throw new DomainException('Only an invitation with unknown delivery may be rotated.');

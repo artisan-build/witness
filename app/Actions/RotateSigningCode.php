@@ -37,11 +37,16 @@ final readonly class RotateSigningCode
                 ->latest('generation')
                 ->lockForUpdate()
                 ->first();
+            if ($latest !== null) {
+                $latest = $this->mailDelivery->markStaleClaimUnknown($latest);
+            }
 
             if ($envelope->status !== EnvelopeStatus::Sent
-                || $signer->status !== SignerStatus::Viewed
-                || $latest?->status !== MailDeliveryStatus::Unknown) {
+                || $signer->status !== SignerStatus::Viewed) {
                 throw new SigningAccessDenied;
+            }
+            if ($latest?->status !== MailDeliveryStatus::Unknown) {
+                throw ValidationException::withMessages(['code' => 'Code delivery is still in progress.']);
             }
 
             $signerKey = 'sign-code-signer:'.$signer->getKey();

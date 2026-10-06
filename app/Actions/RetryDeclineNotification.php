@@ -45,6 +45,9 @@ final readonly class RetryDeclineNotification
                 ->latest('generation')
                 ->lockForUpdate()
                 ->first();
+            if ($latest !== null) {
+                $latest = $this->mailDelivery->markStaleClaimUnknown($latest);
+            }
 
             if ($envelope->status !== EnvelopeStatus::Declined
                 || $signer->status !== SignerStatus::Declined

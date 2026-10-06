@@ -189,3 +189,34 @@ it('permits only one clean claim for a durable delivery generation', function ()
         ->and($handoffs)->toBe(0)
         ->and($envelope->auditEvents()->where('type', AuditEventType::EmailSent)->count())->toBe(1);
 });
+
+it('requires a stale claim before explicit secret rotation can recover a crashed handoff', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+    $delivery = $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail();
+    $delivery->update([
+        'status' => MailDeliveryStatus::Sending,
+        'attempted_at' => now()->subMinutes(9),
+    ]);
+
+    $this->from(route('sign.show'))->post(route('sign.code.rotate'))
+        ->assertRedirect(route('sign.show'))
+        ->assertSessionHasErrors('code');
+    expect($signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->count())->toBe(1);
+
+    $delivery->update(['attempted_at' => now()->subMinutes(11)]);
+    Mail::fake();
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+    $this->post(route('sign.code.rotate'))->assertRedirect(route('sign.show'));
+    expect($signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->orderBy('generation')
+        ->pluck('status')->all())->toBe([
+            MailDeliveryStatus::Unknown,
+            MailDeliveryStatus::Sent,
+        ]);
+});

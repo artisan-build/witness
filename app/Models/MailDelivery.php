@@ -6,12 +6,14 @@ namespace App\Models;
 
 use App\Enums\MailDeliveryPurpose;
 use App\Enums\MailDeliveryStatus;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * @property MailDeliveryPurpose $purpose
  * @property MailDeliveryStatus $status
+ * @property CarbonImmutable|null $attempted_at
  */
 class MailDelivery extends Model
 {

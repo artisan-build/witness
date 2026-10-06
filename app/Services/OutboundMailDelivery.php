@@ -18,6 +18,8 @@ use Throwable;
 
 final class OutboundMailDelivery
 {
+    private const int STALE_CLAIM_MINUTES = 10;
+
     public function create(Envelope $envelope, Signer $signer, MailDeliveryPurpose $purpose): MailDelivery
     {
         $generation = ((int) MailDelivery::query()
@@ -75,7 +77,7 @@ final class OutboundMailDelivery
         try {
             $handoff();
 
-            DB::transaction(function () use (
+            $finalized = DB::transaction(function () use (
                 $delivery,
                 $eventType,
                 $actorType,
@@ -83,13 +85,13 @@ final class OutboundMailDelivery
                 $ipAddress,
                 $userAgent,
                 $payload,
-            ): void {
+            ): bool {
                 $envelope = Envelope::query()->lockForUpdate()->findOrFail($delivery->envelope_id);
                 Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
                 $locked = MailDelivery::query()->lockForUpdate()->findOrFail($delivery->getKey());
 
                 if ($locked->status !== MailDeliveryStatus::Sending) {
-                    return;
+                    return false;
                 }
 
                 $locked->update([
@@ -111,9 +113,11 @@ final class OutboundMailDelivery
                         ]),
                     );
                 }
+
+                return true;
             });
 
-            return true;
+            return $finalized;
         } catch (Throwable) {
             DB::transaction(function () use ($delivery): void {
                 Envelope::query()->lockForUpdate()->findOrFail($delivery->envelope_id);
@@ -130,5 +134,19 @@ final class OutboundMailDelivery
 
             return false;
         }
+    }
+
+    /** The caller must already hold the envelope, signer, and delivery row locks. */
+    public function markStaleClaimUnknown(MailDelivery $delivery): MailDelivery
+    {
+        if ($delivery->status === MailDeliveryStatus::Sending
+            && $delivery->attempted_at?->lte(now()->subMinutes(self::STALE_CLAIM_MINUTES))) {
+            $delivery->update([
+                'status' => MailDeliveryStatus::Unknown,
+                'unknown_at' => now(),
+            ]);
+        }
+
+        return $delivery;
     }
 }
