@@ -119,6 +119,44 @@ final class RenderedPdfInspector
         ];
     }
 
+    /** @return array{x: float, y: float} */
+    public function sourceTextOriginOnPage(int $page, string $text): array
+    {
+        $number = '(-?[\d.]+)';
+        if (! preg_match(
+            '/q\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+cm\s+\/IMP\d+\s+Do\s+Q/',
+            $this->pageContent($page),
+            $placement,
+        )) {
+            throw new RuntimeException('The imported source placement matrix could not be inspected.');
+        }
+
+        $form = $this->sourceForm($page);
+        if (! preg_match(
+            '/\/Matrix \[\s*'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s*\]/',
+            $form['dictionary'],
+            $matrix,
+        ) || ! preg_match(
+            '/'.$number.'\s+'.$number.'\s+Td\s+\('.preg_quote($text, '/').'\)\s+Tj/',
+            $form['content'],
+            $origin,
+        )) {
+            throw new RuntimeException('The imported source text origin could not be inspected.');
+        }
+
+        $x = ((float) $matrix[1] * (float) $origin[1])
+            + ((float) $matrix[3] * (float) $origin[2])
+            + (float) $matrix[5];
+        $y = ((float) $matrix[2] * (float) $origin[1])
+            + ((float) $matrix[4] * (float) $origin[2])
+            + (float) $matrix[6];
+
+        return [
+            'x' => ((float) $placement[1] * $x) + ((float) $placement[3] * $y) + (float) $placement[5],
+            'y' => ((float) $placement[2] * $x) + ((float) $placement[4] * $y) + (float) $placement[6],
+        ];
+    }
+
     public function renderedText(?int $page = null): string
     {
         $maps = [];

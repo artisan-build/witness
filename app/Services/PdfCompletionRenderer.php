@@ -63,9 +63,32 @@ final readonly class PdfCompletionRenderer
         $fieldsByPage = $envelope->fields()->with('signer')->orderBy('id')->get()->groupBy('page');
 
         for ($pageNumber = 1; $pageNumber <= $sourcePageCount; $pageNumber++) {
-            $template = $pdf->addPageFromImport($sourceId, $pageNumber, self::IMPORT_OPTIONS);
+            $template = $pdf->importPage($sourceId, $pageNumber, self::IMPORT_OPTIONS);
             $pageHeight = $template->getHeight();
             $pageWidth = $template->getWidth();
+            $pdf->addPage([
+                'format' => '',
+                'width' => $pageWidth,
+                'height' => $pageHeight,
+                'orientation' => $pageWidth > $pageHeight ? 'L' : 'P',
+            ]);
+
+            $cropBox = $template->getMediaBox();
+            $placementX = 0.0;
+            $placementY = 0.0;
+            if ($template->getRotation() === 90) {
+                // tc-lib's rotation matrix assumes a zero-origin CropBox; offset through its placement API.
+                $placementX = -$cropBox[1];
+                $placementY = -$cropBox[0];
+            }
+            $pdf->useImportedPage(
+                $template,
+                $placementX,
+                $placementY,
+                $pageWidth,
+                $pageHeight,
+                ['keepAspectRatio' => false],
+            );
 
             foreach ($fieldsByPage->get($pageNumber, collect()) as $field) {
                 if ($field->value === null || $field->completed_at === null) {

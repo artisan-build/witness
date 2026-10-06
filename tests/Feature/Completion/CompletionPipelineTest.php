@@ -255,6 +255,17 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
         };
         expect($sourceForm['dictionary'])->toContain('/Matrix ['.implode(' ', $expectedMatrix));
 
+        if ($fixture === 'rotated-mixed-sizes.pdf' && $index === 1) {
+            $labelOrigin = $inspector->sourceTextOriginOnPage(
+                $index + 1,
+                'PAGE 2 MediaBox 300x500 CropBox 20 30 280 470 Rotate 90',
+            );
+            expect(abs($labelOrigin['x'] - 412))->toBeLessThanOrEqual(0.01)
+                ->and(abs($labelOrigin['y'] - 244))->toBeLessThanOrEqual(0.01)
+                ->and($labelOrigin['x'])->toBeGreaterThan(0)->toBeLessThan($page['width'])
+                ->and($labelOrigin['y'])->toBeGreaterThan(0)->toBeLessThan($page['height']);
+        }
+
         if ($fixture === 'scanned-image-letter.pdf') {
             expect($final)->toContain('/Width 1200')->toContain('/Height 1553')
                 ->and($sourceForm['content'])->toMatch('/\/[A-Za-z0-9]+ Do/');
