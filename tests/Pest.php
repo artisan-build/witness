@@ -61,7 +61,7 @@ function something(): void
     // ..
 }
 
-function createSigningEnvelope(array $types = []): array
+function createSigningEnvelope(array $types = [], bool $send = true): array
 {
     Storage::fake('local');
     Mail::fake();
@@ -100,6 +100,10 @@ function createSigningEnvelope(array $types = []): array
             'width' => .3,
             'height' => .08,
         ]);
+    }
+
+    if (! $send) {
+        return [$envelope->refresh(), $signer->refresh(), null];
     }
 
     resolve(SendEnvelope::class)->handle(

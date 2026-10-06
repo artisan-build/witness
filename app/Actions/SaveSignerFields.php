@@ -72,6 +72,10 @@ final class SaveSignerFields
                         throw ValidationException::withMessages(['fields' => 'A field response was not valid.']);
                     }
 
+                    if ($this->isEmptySignatureResponse($field, $response)) {
+                        continue;
+                    }
+
                     $value = $this->normalize($field, $response ?? [], $createdPaths);
                     $oldPath = $field->value['path'] ?? null;
 
@@ -147,6 +151,22 @@ final class SaveSignerFields
         return $value;
     }
 
+    /** @param array<string, mixed>|null $response */
+    private function isEmptySignatureResponse(Field $field, ?array $response): bool
+    {
+        if (! in_array($field->type, [FieldType::Signature, FieldType::Initials], true) || $response === null) {
+            return false;
+        }
+
+        return match ($response['kind'] ?? null) {
+            'typed' => ! isset($response['typed'])
+                || (is_string($response['typed']) && trim($response['typed']) === ''),
+            'drawn' => ! isset($response['drawn'])
+                || (is_string($response['drawn']) && trim($response['drawn']) === ''),
+            default => false,
+        };
+    }
+
     /**
      * @param  array<string, mixed>  $response
      * @param  list<string>  $createdPaths
@@ -179,7 +199,8 @@ final class SaveSignerFields
             || $dimensions === false
             || $dimensions['mime'] !== 'image/png'
             || $dimensions[0] > 2000
-            || $dimensions[1] > 1000) {
+            || $dimensions[1] > 1000
+            || ! $this->isCompletePng($bytes)) {
             throw ValidationException::withMessages(['fields' => 'The drawn signature image is not valid.']);
         }
 
@@ -190,5 +211,53 @@ final class SaveSignerFields
         $createdPaths[] = $path;
 
         return ['kind' => 'drawn', 'path' => $path, 'sha256' => hash('sha256', $bytes)];
+    }
+
+    private function isCompletePng(string $bytes): bool
+    {
+        $offset = 8;
+        $length = strlen($bytes);
+        $sawImageData = false;
+
+        while ($offset + 12 <= $length) {
+            $chunkLength = unpack('Nlength', substr($bytes, $offset, 4));
+            if ($chunkLength === false) {
+                return false;
+            }
+
+            $dataLength = $chunkLength['length'];
+            $chunkEnd = $offset + 12 + $dataLength;
+            if ($chunkEnd > $length) {
+                return false;
+            }
+
+            $type = substr($bytes, $offset + 4, 4);
+            $data = substr($bytes, $offset + 8, $dataLength);
+            $storedCrc = substr($bytes, $offset + 8 + $dataLength, 4);
+            $calculatedCrc = pack('H*', hash('crc32b', $type.$data));
+
+            if (! hash_equals($storedCrc, $calculatedCrc)) {
+                return false;
+            }
+
+            if ($offset === 8) {
+                if ($type !== 'IHDR' || $dataLength !== 13) {
+                    return false;
+                }
+            } elseif ($type === 'IHDR') {
+                return false;
+            }
+
+            if ($type === 'IDAT') {
+                $sawImageData = true;
+            }
+
+            $offset = $chunkEnd;
+            if ($type === 'IEND') {
+                return $dataLength === 0 && $sawImageData && $offset === $length;
+            }
+        }
+
+        return false;
     }
 }

@@ -7,12 +7,14 @@ namespace App\Actions;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
+use App\Enums\MailDeliveryPurpose;
 use App\Enums\SignerStatus;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Exceptions\SigningAccessDenied;
 use App\Mail\SigningDeclined;
 use App\Models\Envelope;
 use App\Models\Signer;
+use App\Services\OutboundMailDelivery;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -20,6 +22,8 @@ use Illuminate\Validation\ValidationException;
 
 final class DeclineEnvelope
 {
+    public function __construct(private readonly OutboundMailDelivery $mailDelivery) {}
+
     public function handle(
         Signer $boundSigner,
         #[\SensitiveParameter] string $reason,
@@ -31,13 +35,12 @@ final class DeclineEnvelope
             throw ValidationException::withMessages(['reason' => 'Enter a plain-text reason of 2,000 characters or fewer.']);
         }
 
-        $notify = false;
-        $signer = DB::transaction(function () use ($boundSigner, $reason, $ipAddress, $userAgent, &$notify): Signer {
+        [$signer, $delivery] = DB::transaction(function () use ($boundSigner, $reason, $ipAddress, $userAgent): array {
             $envelope = Envelope::query()->with('sender')->lockForUpdate()->findOrFail($boundSigner->envelope_id);
             $signer = Signer::query()->lockForUpdate()->findOrFail($boundSigner->getKey());
 
             if ($envelope->status === EnvelopeStatus::Declined && $signer->status === SignerStatus::Declined) {
-                return $signer;
+                return [$signer, null];
             }
 
             if ($envelope->status !== EnvelopeStatus::Sent
@@ -69,17 +72,27 @@ final class DeclineEnvelope
                 'updated_at' => now(),
             ]);
             DB::statement("SET LOCAL witness.envelope_transition = 'off'");
-            $notify = true;
+            $signer->refresh()->load('envelope.sender');
+            $delivery = $this->mailDelivery->create(
+                $envelope,
+                $signer,
+                MailDeliveryPurpose::DeclineNotification,
+            );
 
-            return $signer->refresh()->load('envelope.sender');
+            return [$signer, $delivery];
         });
 
-        if ($notify) {
-            Mail::to($signer->envelope->sender->email)->send(new SigningDeclined(
-                $signer->envelope,
-                $signer,
-                $reason,
-            ));
+        if ($delivery !== null) {
+            $this->mailDelivery->deliver(
+                $delivery,
+                fn () => Mail::to($signer->envelope->sender->email)->send(new SigningDeclined(
+                    $signer->envelope,
+                    $signer,
+                    $reason,
+                )),
+                null,
+                AuditActorType::System,
+            );
         }
 
         return $signer;

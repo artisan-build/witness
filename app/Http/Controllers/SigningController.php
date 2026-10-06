@@ -7,9 +7,12 @@ namespace App\Http\Controllers;
 use App\Actions\DeclineEnvelope;
 use App\Actions\OpenSigningLink;
 use App\Actions\RecordSigningConsent;
+use App\Actions\RotateSigningCode;
 use App\Actions\SaveSignerFields;
 use App\Actions\SignEnvelope;
 use App\Actions\VerifySigningCode;
+use App\Enums\MailDeliveryPurpose;
+use App\Enums\MailDeliveryStatus;
 use App\Exceptions\SigningAccessDenied;
 use App\Services\SigningSession;
 use DomainException;
@@ -26,6 +29,7 @@ final readonly class SigningController
         private SigningSession $session,
         private OpenSigningLink $openLink,
         private VerifySigningCode $verifyCode,
+        private RotateSigningCode $rotateCode,
         private RecordSigningConsent $recordConsent,
         private SaveSignerFields $saveSignerFields,
         private SignEnvelope $signEnvelope,
@@ -55,7 +59,12 @@ final readonly class SigningController
         $binding = $request->session()->get('witness.signer');
 
         if (! is_array($binding) || ($binding['verified'] ?? false) !== true) {
-            return view('sign.challenge', compact('signer'));
+            $deliveryFailed = $signer->mailDeliveries()
+                ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+                ->latest('generation')
+                ->first()?->status === MailDeliveryStatus::Unknown;
+
+            return view('sign.challenge', compact('signer', 'deliveryFailed'));
         }
 
         if ($signer->consented_at === null) {
@@ -72,6 +81,18 @@ final readonly class SigningController
             $data = $request->validate(['code' => ['required', 'digits:6']]);
             $this->verifyCode->handle($signer, $data['code'], $request->ip(), $request->userAgent());
             $this->session->verify($request);
+
+            return to_route('sign.show');
+        } catch (SigningAccessDenied) {
+            return $this->neutral();
+        }
+    }
+
+    public function rotateCode(Request $request): RedirectResponse|View
+    {
+        try {
+            $signer = $this->session->signer($request);
+            $this->rotateCode->handle($signer, $request->ip(), $request->userAgent());
 
             return to_route('sign.show');
         } catch (SigningAccessDenied) {

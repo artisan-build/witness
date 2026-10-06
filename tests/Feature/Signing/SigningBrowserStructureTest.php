@@ -36,7 +36,7 @@ it('keeps every signer route outside human authentication middleware', function 
     $routes = collect(resolve('router')->getRoutes()->getRoutes())
         ->filter(fn (Route $route): bool => $route->getControllerClass() === SigningController::class);
 
-    expect($routes)->toHaveCount(8);
+    expect($routes)->toHaveCount(9);
     foreach ($routes as $route) {
         expect($route->gatherMiddleware())->toContain('throttle:signing-public')
             ->not->toContain(EnsureUserIsAuthenticated::class)

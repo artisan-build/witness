@@ -7,12 +7,15 @@ namespace App\Actions;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
+use App\Enums\MailDeliveryPurpose;
 use App\Enums\SignerStatus;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Exceptions\SigningAccessDenied;
 use App\Mail\SigningCode;
 use App\Models\Envelope;
+use App\Models\MailDelivery;
 use App\Models\Signer;
+use App\Services\OutboundMailDelivery;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -21,6 +24,8 @@ use Illuminate\Validation\ValidationException;
 
 final class OpenSigningLink
 {
+    public function __construct(private readonly OutboundMailDelivery $mailDelivery) {}
+
     /** @return array{signer: Signer, token_hash: string} */
     public function handle(#[\SensitiveParameter] string $token, ?string $ipAddress, ?string $userAgent): array
     {
@@ -31,7 +36,7 @@ final class OpenSigningLink
             throw new SigningAccessDenied;
         }
 
-        return DB::transaction(function () use ($candidate, $tokenHash, $ipAddress, $userAgent): array {
+        $result = DB::transaction(function () use ($candidate, $tokenHash, $ipAddress, $userAgent): array {
             $envelope = Envelope::query()->with('sender')->lockForUpdate()->findOrFail($candidate->envelope_id);
             $signer = Signer::query()->lockForUpdate()->findOrFail($candidate->getKey());
 
@@ -62,15 +67,37 @@ final class OpenSigningLink
                 $signer->refresh();
             }
 
+            $mail = null;
             if ($signer->otp_hash === null || $signer->otp_expires_at === null || $signer->otp_expires_at->isPast()) {
-                $this->issueCode($envelope, $signer, $ipAddress, $userAgent);
+                $mail = $this->issueCode($envelope, $signer, $ipAddress);
             }
 
-            return ['signer' => $signer->refresh(), 'token_hash' => $tokenHash];
+            return [
+                'binding' => ['signer' => $signer->refresh(), 'token_hash' => $tokenHash],
+                'envelope' => $envelope,
+                'mail' => $mail,
+            ];
         });
+
+        if ($result['mail'] !== null) {
+            $mail = $result['mail'];
+            $signer = $result['binding']['signer'];
+            $this->mailDelivery->deliver(
+                $mail['delivery'],
+                fn () => Mail::to($signer->email)->send(new SigningCode($result['envelope'], $signer, $mail['code'])),
+                AuditEventType::CodeSent,
+                AuditActorType::Signer,
+                $signer->getKey(),
+                $ipAddress,
+                $userAgent,
+            );
+        }
+
+        return $result['binding'];
     }
 
-    private function issueCode(Envelope $envelope, Signer $signer, ?string $ipAddress, ?string $userAgent): void
+    /** @return array{code: string, delivery: MailDelivery} */
+    private function issueCode(Envelope $envelope, Signer $signer, ?string $ipAddress): array
     {
         $signerKey = 'sign-code-signer:'.$signer->getKey();
         $ipKey = 'sign-code-ip:'.hash('sha256', $ipAddress ?? 'unknown');
@@ -94,14 +121,15 @@ final class OpenSigningLink
         ]);
         DB::statement("SET LOCAL witness.signer_progress_write = 'off'");
 
-        Mail::to($signer->email)->send(new SigningCode($envelope, $signer, $code));
-        EnvelopeLifecycleRecorded::record(
-            $envelope,
-            AuditEventType::CodeSent,
-            AuditActorType::Signer,
-            $signer->getKey(),
-            $ipAddress,
-            $userAgent,
-        );
+        $signer->refresh();
+
+        return [
+            'code' => $code,
+            'delivery' => $this->mailDelivery->create(
+                $envelope,
+                $signer,
+                MailDeliveryPurpose::SigningCode,
+            ),
+        ];
     }
 }

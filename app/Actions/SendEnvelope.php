@@ -7,12 +7,15 @@ namespace App\Actions;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
+use App\Enums\MailDeliveryPurpose;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Mail\SigningInvitation;
 use App\Models\Envelope;
+use App\Models\MailDelivery;
 use App\Models\Signer;
 use App\Models\Team;
 use App\Services\EnvelopeSendValidator;
+use App\Services\OutboundMailDelivery;
 use ArtisanBuild\BuiltForCloud\User;
 use DomainException;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +23,10 @@ use Illuminate\Support\Facades\Mail;
 
 final readonly class SendEnvelope
 {
-    public function __construct(private EnvelopeSendValidator $validator) {}
+    public function __construct(
+        private EnvelopeSendValidator $validator,
+        private OutboundMailDelivery $mailDelivery,
+    ) {}
 
     public function handle(
         Team $team,
@@ -33,7 +39,7 @@ final readonly class SendEnvelope
             throw new DomainException('The sender must belong to the envelope team.');
         }
 
-        return DB::transaction(function () use ($team, $sender, $envelopeId, $ipAddress, $userAgent): Envelope {
+        [$envelope, $invitations] = DB::transaction(function () use ($team, $sender, $envelopeId, $ipAddress, $userAgent): array {
             $envelope = Envelope::query()
                 ->forTeam($team)
                 ->where('sender_id', $sender->getKey())
@@ -45,9 +51,16 @@ final readonly class SendEnvelope
             }
 
             $envelope->load(['document', 'sender', 'signers.fields', 'fields']);
+            $lockedSigners = Signer::query()
+                ->where('envelope_id', $envelope->getKey())
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->load('fields');
+            $envelope->setRelation('signers', $lockedSigners);
             $this->validator->assertSendable($envelope);
 
-            /** @var list<array{signer: Signer, token: string}> $invitations */
+            /** @var list<array{signer: Signer, token: string, delivery: MailDelivery}> $invitations */
             $invitations = [];
 
             DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
@@ -57,7 +70,16 @@ final readonly class SendEnvelope
                     'link_token_hash' => hash('sha256', $token),
                     'updated_at' => now(),
                 ]);
-                $invitations[] = ['signer' => $signer->refresh(), 'token' => $token];
+                $signer->refresh();
+                $invitations[] = [
+                    'signer' => $signer,
+                    'token' => $token,
+                    'delivery' => $this->mailDelivery->create(
+                        $envelope,
+                        $signer,
+                        MailDeliveryPurpose::SigningInvitation,
+                    ),
+                ];
             }
             DB::statement("SET LOCAL witness.signer_progress_write = 'off'");
 
@@ -91,25 +113,25 @@ final readonly class SendEnvelope
                 payload: ['signer_count' => $envelope->signers()->count()],
             );
 
-            foreach ($invitations as $invitation) {
-                Mail::to($invitation['signer']->email)->send(new SigningInvitation(
-                    $envelope,
-                    $invitation['signer'],
-                    $invitation['token'],
-                ));
-
-                EnvelopeLifecycleRecorded::record(
-                    envelope: $envelope,
-                    type: AuditEventType::EmailSent,
-                    actorType: AuditActorType::System,
-                    payload: [
-                        'purpose' => 'signing_invitation',
-                        'signer_id' => $invitation['signer']->getKey(),
-                    ],
-                );
-            }
-
-            return $envelope->refresh()->load(['document', 'sender']);
+            return [$envelope->refresh()->load(['document', 'sender']), $invitations];
         });
+
+        foreach ($invitations as $invitation) {
+            $this->mailDelivery->deliver(
+                $invitation['delivery'],
+                function () use ($envelope, $invitation): void {
+                    Mail::to($invitation['signer']->email)->send(new SigningInvitation(
+                        $envelope,
+                        $invitation['signer'],
+                        $invitation['token'],
+                    ));
+                },
+                AuditEventType::EmailSent,
+                AuditActorType::System,
+                payload: ['signer_id' => $invitation['signer']->getKey()],
+            );
+        }
+
+        return $envelope;
     }
 }

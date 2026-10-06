@@ -7,14 +7,16 @@ use App\Http\Controllers\EnvelopeController;
 use App\Http\Controllers\SigningController;
 use App\Http\Controllers\TeamSelectionController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Middleware\AddSigningSecurityHeaders;
 use App\Http\Middleware\EnsureSelectedTeam;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('throttle:signing-public')->group(function (): void {
+Route::middleware([AddSigningSecurityHeaders::class, 'throttle:signing-public'])->group(function (): void {
     Route::get('/sign', [SigningController::class, 'show'])->name('sign.show');
     Route::post('/sign/code', [SigningController::class, 'verify'])->name('sign.verify');
+    Route::post('/sign/code/rotate', [SigningController::class, 'rotateCode'])->name('sign.code.rotate');
     Route::post('/sign/consent', [SigningController::class, 'consent'])->name('sign.consent');
     Route::get('/sign/document', [SigningController::class, 'document'])->name('sign.document');
     Route::post('/sign/fields', [SigningController::class, 'saveFields'])->name('sign.fields');

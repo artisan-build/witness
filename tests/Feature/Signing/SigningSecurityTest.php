@@ -19,10 +19,13 @@ use ArtisanBuild\BuiltForCloud\Mail\ScalpelsTransport;
 use Illuminate\Database\QueryException;
 use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Transport\ArrayTransport;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Tests\Support\HostileAuthUser;
 
 it('keeps invalid, cross-envelope, sender-session, and terminal access neutral', function (): void {
     [$envelopeA, $signerA, $tokenA] = createSigningEnvelope([FieldType::Signature]);
@@ -154,7 +157,12 @@ it('declines once, encrypts the reason, notifies once, and keeps audit payloads 
         ->and($rawReason)->not->toContain($reason)
         ->and($events)->toHaveCount(1)
         ->and(json_encode($events->first()->payload, JSON_THROW_ON_ERROR))->not->toContain($reason);
-    Mail::assertSent(SigningDeclined::class, 1);
+    Mail::assertSent(SigningDeclined::class, function (SigningDeclined $mail) use ($envelope): bool {
+        $metadata = $mail->envelope();
+
+        return $metadata->from?->name === $envelope->sender->name.' via Witness'
+            && $metadata->replyTo[0]->address === $envelope->sender->email;
+    });
 });
 
 it('rejects executable typed content and malformed drawn signatures without persistence', function (): void {
@@ -174,6 +182,82 @@ it('rejects executable typed content and malformed drawn signatures without pers
     ]])->assertSessionHasErrors('fields');
     expect(session('_old_input.fields'))->toBeNull()
         ->and($field->fresh()->value)->toBeNull();
+
+    $validPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+    $this->post(route('sign.fields'), ['fields' => [
+        $field->getKey() => [
+            'kind' => 'drawn',
+            'drawn' => 'data:image/png;base64,'.base64_encode($validPng.'<script>alert(1)</script>'),
+        ],
+    ]])->assertSessionHasErrors('fields');
+    expect($field->fresh()->value)->toBeNull()
+        ->and(Storage::allFiles('signatures'))->toBeEmpty();
+});
+
+it('sets anti-framing policy on every signer HTML and redirect surface while sandboxing PDFs', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $assertHtmlPolicy = function ($response): void {
+        $response->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('Referrer-Policy', 'no-referrer');
+        expect($response->headers->get('Content-Security-Policy'))->toContain("frame-ancestors 'none'");
+    };
+
+    $assertHtmlPolicy($this->get(route('sign.open', 'invalid-token')));
+    $assertHtmlPolicy($this->get(route('sign.open', $token)));
+    $assertHtmlPolicy($this->get(route('sign.show')));
+    $assertHtmlPolicy($this->post(route('sign.verify'), ['code' => 'invalid']));
+    $code = null;
+    Mail::assertSent(SigningCode::class, function (SigningCode $mail) use (&$code): bool {
+        $code = $mail->code;
+
+        return true;
+    });
+    $assertHtmlPolicy($this->post(route('sign.verify'), ['code' => $code]));
+    $assertHtmlPolicy($this->get(route('sign.show')));
+    $assertHtmlPolicy($this->post(route('sign.consent'), ['consent' => '1']));
+    $assertHtmlPolicy($this->get(route('sign.show')));
+    $pdf = $this->get(route('sign.document'))->assertOk();
+    $pdf->assertHeader('Content-Security-Policy', "default-src 'none'; sandbox")
+        ->assertHeaderMissing('X-Frame-Options');
+    $field = $signer->fields()->firstOrFail();
+    $assertHtmlPolicy($this->post(route('sign.fields'), ['fields' => [
+        $field->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer', 'drawn' => ''],
+    ]]));
+    $assertHtmlPolicy($this->post(route('sign.complete'), ['intent' => '1']));
+
+    [, , $declineToken] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $declineToken);
+    $this->post(route('sign.consent'), ['consent' => '1']);
+    $assertHtmlPolicy($this->post(route('sign.decline'), ['reason' => 'No thank you.']));
+});
+
+it('keeps human authentication irrelevant across every public signer endpoint', function (): void {
+    [$envelope] = createSigningEnvelope([FieldType::Signature]);
+    config([
+        'auth.defaults.guard' => 'hostile',
+        'auth.guards.hostile' => ['driver' => 'session', 'provider' => 'hostile-users'],
+        'auth.providers.hostile-users' => ['driver' => 'eloquent', 'model' => HostileAuthUser::class],
+    ]);
+    Auth::forgetGuards();
+    $guard = Auth::guard('hostile');
+    $this->withSession([$guard->getName() => $envelope->sender_id]);
+    $requests = [
+        fn () => $this->get(route('sign.show')),
+        fn () => $this->post(route('sign.verify'), ['code' => '123456']),
+        fn () => $this->post(route('sign.code.rotate')),
+        fn () => $this->post(route('sign.consent'), ['consent' => '1']),
+        fn () => $this->get(route('sign.document')),
+        fn () => $this->post(route('sign.fields'), ['fields' => []]),
+        fn () => $this->post(route('sign.complete'), ['intent' => '1']),
+        fn () => $this->post(route('sign.decline'), ['reason' => 'No']),
+        fn () => $this->get(route('sign.open', 'invalid-token')),
+    ];
+
+    foreach ($requests as $request) {
+        $request()->assertOk()
+            ->assertSee('data-testid="signer-neutral"', false)
+            ->assertDontSee($envelope->title);
+    }
 });
 
 it('redacts short rejected codes from exception traces and durable non-secret columns', function (): void {

@@ -68,6 +68,12 @@ class Signer extends Model
         return $this->hasMany(Field::class);
     }
 
+    /** @return HasMany<MailDelivery, $this> */
+    public function mailDeliveries(): HasMany
+    {
+        return $this->hasMany(MailDelivery::class);
+    }
+
     private function assertDraftEnvelope(string $message): void
     {
         $isDraft = Envelope::query()

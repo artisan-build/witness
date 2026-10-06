@@ -105,6 +105,56 @@ it('provisions and sends each signer link only once across duplicate send attemp
     Mail::assertSent(SigningInvitation::class, 1);
 });
 
+it('saves partial rendered signature forms and preserves an existing drawing on re-entry', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature, FieldType::Initials]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+    $fields = $signer->fields()->get()->keyBy(fn ($field) => $field->type->value);
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[FieldType::Signature->value]->getKey() => [
+            'kind' => 'typed',
+            'typed' => 'Alex Signer',
+            'drawn' => '',
+        ],
+        $fields[FieldType::Initials->value]->getKey() => [
+            'kind' => 'typed',
+            'typed' => '',
+            'drawn' => '',
+        ],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+
+    $png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[FieldType::Initials->value]->getKey() => [
+            'kind' => 'drawn',
+            'typed' => '',
+            'drawn' => $png,
+        ],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+    $drawing = $fields[FieldType::Initials->value]->fresh()->value;
+
+    $this->get(route('sign.show'))
+        ->assertOk()
+        ->assertSee('value="drawn" checked', false);
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[FieldType::Signature->value]->getKey() => [
+            'kind' => 'typed',
+            'typed' => 'Alex Updated',
+            'drawn' => '',
+        ],
+        $fields[FieldType::Initials->value]->getKey() => [
+            'kind' => 'drawn',
+            'typed' => '',
+            'drawn' => '',
+        ],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+
+    expect($fields[FieldType::Signature->value]->fresh()->value['text'])->toBe('Alex Updated')
+        ->and($fields[FieldType::Initials->value]->fresh()->value)->toBe($drawing)
+        ->and(Storage::exists($drawing['path']))->toBeTrue();
+});
+
 it('locks an OTP after five failures without flashing or retaining rejected codes', function (): void {
     [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
     $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));

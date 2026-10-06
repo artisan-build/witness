@@ -2,7 +2,15 @@
     <section class="signing-card signing-narrow" data-testid="signer-otp">
         <p class="signing-kicker">Email verification</p>
         <h1>Check your email</h1>
-        <p>We sent a six-digit code to the address for {{ $signer->name }}. It expires in 10 minutes.</p>
+        @if ($deliveryFailed)
+            <p>We could not confirm that the code was delivered. Request a new code before continuing.</p>
+            <form method="POST" action="{{ route('sign.code.rotate') }}" class="signing-stack">
+                @csrf
+                <button class="signing-button" type="submit">Send a new code</button>
+            </form>
+        @else
+            <p>We sent a six-digit code to the address for {{ $signer->name }}. It expires in 10 minutes.</p>
+        @endif
         <form method="POST" action="{{ route('sign.verify') }}" class="signing-stack">
             @csrf
             <label for="code">Verification code</label>
