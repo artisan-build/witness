@@ -24,7 +24,7 @@
                     @csrf
                     @method('PUT')
                     <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
-                    <flux:button type="submit" variant="primary">Replace</flux:button>
+                    <button class="witness-button" type="submit">Replace</button>
                 </form>
             </section>
 

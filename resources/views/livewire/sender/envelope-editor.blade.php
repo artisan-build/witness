@@ -29,7 +29,7 @@
                         @csrf
                         @method('PUT')
                         <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
-                        <flux:button type="submit" variant="primary">Replace</flux:button>
+                        <button class="witness-button" type="submit">Replace</button>
                     </form>
                 @endif
             </section>
@@ -59,8 +59,8 @@
                             </template>
                         </div>
                         <div class="witness-actions">
-                            <flux:button type="button" variant="primary" x-on:click="add()">Add signer</flux:button>
-                            <flux:button type="submit" variant="primary">Save signers</flux:button>
+                            <button class="witness-button" type="button" x-on:click="add()">Add signer</button>
+                            <button class="witness-button" type="submit">Save signers</button>
                         </div>
                     </form>
                 @else
@@ -160,7 +160,7 @@
                 <form method="POST" action="{{ route('sender.envelopes.template', $envelope) }}" class="witness-stack">
                     @csrf
                     <flux:input name="name" label="Template name" required />
-                    <flux:button type="submit" variant="primary">Save as template</flux:button>
+                    <button class="witness-button" type="submit">Save as template</button>
                 </form>
             @else
                 <p class="witness-frozen">Sent {{ $envelope->sent_at?->diffForHumans() }}. Document and fields are locked.</p>

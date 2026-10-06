@@ -57,7 +57,7 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     @$document->loadHTML((string) $envelopeResponse->getContent());
     $xpath = new DOMXPath($document);
     foreach (['Replace', 'Add signer', 'Save signers', 'Save as template'] as $label) {
-        expect($xpath->query('//*[@data-flux-button and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
+        expect($xpath->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button ") and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
     }
 
     $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
@@ -65,7 +65,7 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('<button class="witness-button witness-button-full" type="submit" data-testid="send-envelope">Send and freeze</button>', false)
         ->assertSee('<input class="witness-file-input" type="file"', false);
 
-    $this->get(route('sender.templates.edit', $template))
+    $templateResponse = $this->get(route('sender.templates.edit', $template))
         ->assertOk()
         ->assertSee('wire:name="sender.template-editor"', false)
         ->assertSee('data-testid="template-field-placement"', false)
@@ -74,6 +74,11 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
         ->assertSee('<button class="witness-button" type="submit">Save placements</button>', false)
         ->assertSee('<input class="witness-file-input" type="file"', false);
+
+    $document = new DOMDocument;
+    @$document->loadHTML((string) $templateResponse->getContent());
+    $xpath = new DOMXPath($document);
+    expect($xpath->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button ") and normalize-space(.)="Replace"]')->length)->toBe(1);
 
     $this->get(route('sender.envelopes.create'))
         ->assertOk()
