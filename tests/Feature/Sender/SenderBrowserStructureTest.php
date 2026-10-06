@@ -59,10 +59,27 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('x-data="witnessPlacement', false)
         ->assertSee('data-flux-button', false);
 
+    $senderScript = (string) file_get_contents(public_path('build/assets/sender.js'));
+    $canvasWidth = strpos($senderScript, 'this.$refs.canvas.width = viewport.width;');
+    $canvasHeight = strpos($senderScript, 'this.$refs.canvas.height = viewport.height;');
+    $render = strpos($senderScript, 'const renderTask = page.render({ canvasContext: context, viewport });');
+
     expect(file_exists(public_path('build/assets/pdf.min.mjs')))->toBeTrue()
         ->and(file_exists(public_path('build/assets/pdf.worker.min.mjs')))->toBeTrue()
         ->and(file_exists(public_path('build/assets/pdfjs-LICENSE.txt')))->toBeTrue()
-        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain("import * as pdfjsLib from './pdf.min.mjs'")
-        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain('ResizeObserver')
-        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain("window.Alpine.data('witnessPlacement'");
+        ->and($senderScript)->toContain("import * as pdfjsLib from './pdf.min.mjs'")
+        ->and($senderScript)->toContain('ResizeObserver')
+        ->and($senderScript)->toContain("window.Alpine.data('witnessPlacement'")
+        ->and($senderScript)->toContain('const pdfDocuments = new WeakMap();')
+        ->and($senderScript)->toContain('pdfDocuments.set(this, pdfDocument);')
+        ->and($senderScript)->not->toContain('this.pdf')
+        ->and($senderScript)->toContain('const page = await pdfDocument.getPage(this.currentPage);')
+        ->and($senderScript)->toContain('const renderTask = page.render({ canvasContext: context, viewport });')
+        ->and($canvasWidth)->toBeInt()
+        ->and($canvasHeight)->toBeInt()
+        ->and($render)->toBeInt();
+
+    assert(is_int($canvasWidth) && is_int($canvasHeight) && is_int($render));
+    expect($canvasWidth)->toBeLessThan($render)
+        ->and($canvasHeight)->toBeLessThan($render);
 });

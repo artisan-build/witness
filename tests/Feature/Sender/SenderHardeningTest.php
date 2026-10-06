@@ -12,7 +12,11 @@ use App\Models\Signer;
 use App\Models\Team;
 use App\Models\Template;
 use App\Services\PdfDocumentService;
+use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
 use Database\Factories\UserFactory;
+use Illuminate\Console\Scheduling\CallbackEvent;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -140,6 +144,28 @@ it('durably records failed deletion and retries on the recorded disk', function 
 
     Storage::disk('local')->assertMissing('documents/stale.pdf');
     expect(PendingFileDeletion::query()->count())->toBe(0);
+});
+
+it('runs scheduled private file cleanup inside system authority', function (): void {
+    $event = collect(resolve(Schedule::class)->events())->first(
+        fn (mixed $event): bool => $event instanceof CallbackEvent
+            && $event->description === 'witness:cleanup-private-files',
+    );
+    expect($event)->toBeInstanceOf(CallbackEvent::class);
+    assert($event instanceof CallbackEvent);
+
+    $authorityStates = [];
+    DB::listen(function (QueryExecuted $query) use (&$authorityStates): void {
+        if (str_contains($query->sql, 'pending_file_deletions')) {
+            $authorityStates[] = resolve(SystemAuthorityContext::class)->active();
+        }
+    });
+
+    $event->run(app());
+
+    expect($authorityStates)->not->toBeEmpty()
+        ->and(array_unique($authorityStates))->toBe([true])
+        ->and(resolve(SystemAuthorityContext::class)->active())->toBeFalse();
 });
 
 it('cleans each exact displaced template object across repeated replacements', function (): void {

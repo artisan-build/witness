@@ -3,6 +3,7 @@ import * as pdfjsLib from './pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', import.meta.url).toString();
 
 const key = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+const pdfDocuments = new WeakMap();
 
 const register = () => {
     window.Alpine.data('witnessRepeater', (initialRows, emptyRow) => ({
@@ -33,7 +34,6 @@ const register = () => {
         fields: [],
         loading: true,
         pageCount: 1,
-        pdf: null,
         colors: ['#a64525', '#366a86', '#54705e', '#8a5d1d', '#71558d', '#326f6a'],
 
         init() {
@@ -151,8 +151,9 @@ const register = () => {
 
         async loadPdf(url) {
             try {
-                this.pdf = await pdfjsLib.getDocument({ url, isEvalSupported: false }).promise;
-                this.pageCount = this.pdf.numPages;
+                const pdfDocument = await pdfjsLib.getDocument({ url, isEvalSupported: false }).promise;
+                pdfDocuments.set(this, pdfDocument);
+                this.pageCount = pdfDocument.numPages;
                 await this.renderPage();
             } catch (error) {
                 this.loading = false;
@@ -162,15 +163,17 @@ const register = () => {
         },
 
         async renderPage() {
-            if (this.pdf === null) return;
+            const pdfDocument = pdfDocuments.get(this);
+            if (!pdfDocument) return;
 
             this.loading = true;
-            const page = await this.pdf.getPage(this.currentPage);
+            const page = await pdfDocument.getPage(this.currentPage);
             const viewport = page.getViewport({ scale: 1.6 });
             const context = this.$refs.canvas.getContext('2d');
             this.$refs.canvas.width = viewport.width;
             this.$refs.canvas.height = viewport.height;
-            await page.render({ canvasContext: context, viewport }).promise;
+            const renderTask = page.render({ canvasContext: context, viewport });
+            await renderTask.promise;
             this.$refs.stage.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
             this.loading = false;
         },
