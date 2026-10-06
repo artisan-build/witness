@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 use App\Http\Controllers\SenderDashboardController;
+use App\Support\McpDeploymentContext;
+
+$managedConsoleIssuer = env('BUILT_FOR_CLOUD_CONSOLE_ISSUER');
+$managedConsoleAudience = env('BUILT_FOR_CLOUD_CONSOLE_AUDIENCE');
 
 return [
     'dashboard' => SenderDashboardController::class,
@@ -21,11 +25,18 @@ return [
         'app_purposes' => [],
     ],
 
+    'console' => [
+        'issuer' => is_string($managedConsoleIssuer) && $managedConsoleIssuer !== '' ? $managedConsoleIssuer : null,
+        'audience' => McpDeploymentContext::audience($managedConsoleAudience, config('app.key')),
+        'assertion_max_ttl_seconds' => env('BUILT_FOR_CLOUD_CONSOLE_ASSERTION_MAX_TTL', 120),
+        'clock_skew_seconds' => env('BUILT_FOR_CLOUD_CONSOLE_CLOCK_SKEW', 5),
+    ],
+
     'mcp' => [
         'path' => '/mcp',
         'write_path' => null,
         'destructive_path' => '/mcp/destructive',
-        'delegated' => true,
+        'delegated' => McpDeploymentContext::delegated($managedConsoleIssuer, $managedConsoleAudience),
         'two_phase' => [
             'cache_store' => 'database',
             'ttl_seconds' => 300,

@@ -19,6 +19,7 @@ use App\Mcp\WitnessMcpServer;
 use App\Models\Envelope;
 use App\Models\Team;
 use App\Models\Template;
+use App\Support\McpDeploymentContext;
 use ArtisanBuild\BuiltForCloud\Console\ConsoleKeyring;
 use ArtisanBuild\BuiltForCloud\Credential;
 use ArtisanBuild\BuiltForCloud\CredentialAbilityRegistry;
@@ -161,6 +162,9 @@ function witnessDelegatedAssertion(): string
 }
 
 it('registers the exact effect-scoped MCP doors and six conforming tools', function (): void {
+    $managedIssuer = env('BUILT_FOR_CLOUD_CONSOLE_ISSUER');
+    $managedAudience = env('BUILT_FOR_CLOUD_CONSOLE_AUDIENCE');
+    $delegated = McpDeploymentContext::delegated($managedIssuer, $managedAudience);
     $routes = collect(resolve('router')->getRoutes()->getRoutes())
         ->filter(fn ($route): bool => in_array('POST', $route->methods(), true) && str_starts_with($route->uri(), 'mcp'))
         ->values();
@@ -173,7 +177,9 @@ it('registers the exact effect-scoped MCP doors and six conforming tools', funct
         ->and(config('built-for-cloud.mcp.path'))->toBe('/mcp')
         ->and(config('built-for-cloud.mcp.write_path'))->toBeNull()
         ->and(config('built-for-cloud.mcp.destructive_path'))->toBe('/mcp/destructive')
-        ->and(config('built-for-cloud.mcp.delegated'))->toBeTrue()
+        ->and(config('built-for-cloud.mcp.delegated'))->toBe($delegated)
+        ->and(config('built-for-cloud.console.issuer'))->toBe(is_string($managedIssuer) && $managedIssuer !== '' ? $managedIssuer : null)
+        ->and(config('built-for-cloud.console.audience'))->toBe(McpDeploymentContext::audience($managedAudience, config('app.key')))
         ->and(config('built-for-cloud.mcp.two_phase.cache_store'))->toBe('database')
         ->and(resolve(CredentialAbilityRegistry::class)->all())->toBe([
             WitnessMcpAbility::Read->value,
@@ -181,7 +187,8 @@ it('registers the exact effect-scoped MCP doors and six conforming tools', funct
         ]);
 
     $metadata = $this->getJson('/bfc/meta')->assertOk();
-    expect($metadata->json('capabilities'))->toContain('mcp-serve', 'mcp-delegated', 'mcp-effect-scoped')
+    expect($metadata->json('capabilities'))->toContain('mcp-serve', 'mcp-effect-scoped')
+        ->and(in_array('mcp-delegated', $metadata->json('capabilities'), true))->toBe($delegated)
         ->and($metadata->json('endpoints'))->toMatchArray([
             'mcp' => '/mcp',
             'mcp_destructive' => '/mcp/destructive',
@@ -389,7 +396,6 @@ it('bounds deterministic reads to caller-owned records in current teams', functi
 it('rejects unknown and invalid arguments without confirmations or raw exceptions', function (): void {
     $user = UserFactory::new()->create();
     $credential = createWitnessMcpCredential($user, [WitnessMcpAbility::Read->value, WitnessMcpAbility::Destructive->value]);
-    config(['built-for-cloud.console.audience' => 'witness-test-deployment']);
     $calls = [
         ['/mcp', 'list_templates', ['unexpected' => true]],
         ['/mcp', 'list_envelopes', ['status' => 'not-a-status']],
@@ -568,7 +574,6 @@ it('instantiates and sends the NDA-style template without exposing or reusing it
 it('previews and confirms template sending exactly once through the destructive route', function (): void {
     Storage::fake('local');
     Mail::fake();
-    config(['built-for-cloud.console.audience' => 'witness-test-deployment']);
     $sender = UserFactory::new()->create();
     $team = Team::factory()->create();
     $team->users()->attach($sender);
@@ -622,11 +627,10 @@ it('previews and confirms template sending exactly once through the destructive 
     expect(Envelope::query()->count())->toBe(1);
 });
 
-it('previews, confirms once, and refuses replay for a destructive tool', function (): void {
+it('uses the default deployment context to preview and confirm once while refusing cross-deployment use and replay', function (): void {
     createSigningEnvelope();
     $envelope = Envelope::query()->with('sender')->firstOrFail();
     $credential = createWitnessMcpCredential($envelope->sender, [WitnessMcpAbility::Destructive->value]);
-    config(['built-for-cloud.console.audience' => 'witness-test-deployment']);
     $arguments = ['envelope_id' => $envelope->getKey(), 'reason' => 'The agreement was replaced.'];
 
     $preview = callWitnessMcpTool('/mcp/destructive', $credential['plaintext'], 'void', $arguments)->assertOk();
@@ -635,6 +639,18 @@ it('previews, confirms once, and refuses replay for a destructive tool', functio
     expect($confirmation)->toBeString()->not->toBeEmpty()
         ->and($envelope->fresh()->status)->toBe(EnvelopeStatusEnum::Sent)
         ->and($preview->json('result._meta.two_phase.phase'))->toBe('preview');
+
+    $deployment = config('built-for-cloud.console.audience');
+    $otherDeployment = McpDeploymentContext::audience(null, 'base64:another-install-key');
+    expect($deployment)->toBeString()->not->toBeEmpty()
+        ->and($otherDeployment)->toBeString()->not->toBe($deployment);
+    config(['built-for-cloud.console.audience' => $otherDeployment]);
+    callWitnessMcpTool('/mcp/destructive', $credential['plaintext'], 'void', [
+        ...$arguments,
+        'confirm' => $confirmation,
+    ])->assertStatus(400)->assertJsonPath('error.message', 'confirmation_mismatched');
+    config(['built-for-cloud.console.audience' => $deployment]);
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatusEnum::Sent);
 
     callWitnessMcpTool('/mcp/destructive', $credential['plaintext'], 'void', [
         ...$arguments,
@@ -688,7 +704,6 @@ it('reminds only eligible signers and reports sent and unknown handoffs truthful
             'updated_at' => now(),
         ]);
     });
-    config(['built-for-cloud.console.audience' => 'witness-test-deployment']);
     $credential = createWitnessMcpCredential($envelope->sender, [WitnessMcpAbility::Destructive->value]);
     $arguments = ['envelope_id' => $envelope->getKey()];
     $eligibleHash = $eligible->fresh()->link_token_hash;
@@ -789,7 +804,6 @@ it('gives all confirmed destructive calls zero effects after team membership is 
     ]);
     $role = $template->roles()->create(['label' => 'Signer', 'position' => 0]);
     $role->fields()->create(['page' => 1, 'type' => FieldType::Signature, 'required' => true, 'position_x' => .1, 'position_y' => .2, 'width' => .3, 'height' => .1]);
-    config(['built-for-cloud.console.audience' => 'witness-test-deployment']);
     $credential = createWitnessMcpCredential($envelope->sender, [WitnessMcpAbility::Destructive->value]);
     $calls = [
         'send_from_template' => [
