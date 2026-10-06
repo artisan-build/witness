@@ -497,8 +497,18 @@ it('completes twice for the same sender and signer email', function (): void {
     }
 });
 
-it('paginates a long certificate event list deterministically', function (): void {
-    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature, FieldType::Text]);
+it('lays out long certificate evidence without overlapping emitted text lines', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature, FieldType::Text], false);
+    $envelope->update([
+        'title' => 'Long certificate title '.str_repeat('wide-evidence-token-', 10),
+    ]);
+    resolve(SendEnvelope::class)->handle(
+        $envelope->team,
+        $envelope->sender,
+        $envelope->getKey(),
+        '192.0.2.12',
+        'Certificate layout sender',
+    );
     $field = $signer->fields()->where('type', FieldType::Text)->firstOrFail();
     resolve(UpdateFieldResponse::class)->handle(
         $envelope,
@@ -516,6 +526,7 @@ it('paginates a long certificate event list deterministically', function (): voi
         now(),
     );
 
+    $longUserAgent = 'Mozilla/5.0 '.str_repeat('(compatible; Witness certificate layout regression) ', 8);
     for ($attempt = 1; $attempt <= 80; $attempt++) {
         EnvelopeLifecycleRecorded::record(
             $envelope,
@@ -523,7 +534,7 @@ it('paginates a long certificate event list deterministically', function (): voi
             AuditActorType::Signer,
             $signer->getKey(),
             '192.0.2.12',
-            'Certificate pagination test '.$attempt,
+            $longUserAgent.$attempt,
             ['attempt' => $attempt],
         );
     }
@@ -545,8 +556,31 @@ it('paginates a long certificate event list deterministically', function (): voi
     );
 
     $completed = resolve(PdfCompletionRenderer::class)->render($envelope->refresh());
+    $inspector = new RenderedPdfInspector($completed->bytes);
+    $overlaps = [];
+    $certificateText = '';
+    for ($page = $completed->sourcePageCount + 1; $page <= $completed->sourcePageCount + $completed->certificatePageCount; $page++) {
+        $boxes = $inspector->textLineBoxes($page);
+        foreach ($boxes as $index => $box) {
+            $certificateText .= $box['text'];
+            foreach (array_slice($boxes, $index + 1) as $other) {
+                $horizontalOverlap = $box['x'] < $other['x'] + $other['width'] - 0.01
+                    && $other['x'] < $box['x'] + $box['width'] - 0.01;
+                $verticalOverlap = $box['y'] < $other['y'] + $other['height'] - 0.01
+                    && $other['y'] < $box['y'] + $box['height'] - 0.01;
+                if ($horizontalOverlap && $verticalOverlap) {
+                    $overlaps[] = [$box, $other];
+                }
+            }
+        }
+    }
+
     expect($completed->certificatePageCount)->toBeGreaterThan(1)
-        ->and($completed->sourcePageCount)->toBe(2);
+        ->and($completed->sourcePageCount)->toBe(2)
+        ->and($overlaps)->toBe([])
+        ->and(str_replace(' ', '', $certificateText))->toContain(str_replace(' ', '', $longUserAgent.'1'))
+        ->and($certificateText)->toContain($envelope->document->original_sha256)
+        ->and($certificateText)->toContain($completed->contentSha256);
     $pdf = new Tcpdf;
     $source = $pdf->setImportSourceData($completed->bytes, ['strict_limits' => true]);
     expect($pdf->getSourcePageCount($source))->toBe(

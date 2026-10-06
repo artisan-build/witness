@@ -159,30 +159,7 @@ final class RenderedPdfInspector
     /** @return list<array{font: string, text: string}> */
     public function textRuns(int $page): array
     {
-        $pageData = $this->pages[$page - 1] ?? null;
-        if ($pageData === null) {
-            throw new RuntimeException('The rendered PDF page does not exist.');
-        }
-
-        $pageObject = $this->objects[$pageData['object']];
-        $resourceObject = $pageObject;
-        if (preg_match('/\/Resources (\d+) 0 R/', $pageObject, $resourceReference)) {
-            $resourceObject = $this->objects[(int) $resourceReference[1]] ?? '';
-        }
-
-        preg_match_all('/\/(F\d+)\s+(\d+)\s+0\s+R/', $resourceObject, $references, PREG_SET_ORDER);
-        $fonts = [];
-        foreach ($references as $reference) {
-            $fontObject = $this->objects[(int) $reference[2]] ?? '';
-            if (! preg_match('/\/BaseFont \/([^\s\/]+)/', $fontObject, $baseFont)
-                || ! preg_match('/\/ToUnicode (\d+) 0 R/', $fontObject, $unicodeReference)) {
-                continue;
-            }
-            $fonts[$reference[1]] = [
-                'name' => preg_replace('/^[A-Z]{6}\+/', '', $baseFont[1]) ?? $baseFont[1],
-                'map' => $this->unicodeMap((int) $unicodeReference[1]),
-            ];
-        }
+        $fonts = $this->pageFonts($page);
 
         $decoded = [];
         $content = $this->pageContent($page);
@@ -205,6 +182,51 @@ final class RenderedPdfInspector
         }
 
         return $decoded;
+    }
+
+    /** @return list<array{text: string, x: float, y: float, width: float, height: float}> */
+    public function textLineBoxes(int $page): array
+    {
+        $pageData = $this->pages[$page - 1] ?? null;
+        if ($pageData === null) {
+            throw new RuntimeException('The rendered PDF page does not exist.');
+        }
+
+        $fonts = $this->pageFonts($page);
+        preg_match_all('/BT\s+(.*?)\s+ET/s', $this->pageContent($page), $objects, PREG_SET_ORDER);
+        $boxes = [];
+        foreach ($objects as $object) {
+            preg_match_all('/\/(F\d+)\s+([\d.]+)\s+Tf\b/', $object[1], $fontMatches, PREG_SET_ORDER);
+            $fontMatch = end($fontMatches);
+            if (! is_array($fontMatch)
+                || ! preg_match('/(-?[\d.]+)\s+(-?[\d.]+)\s+Td\b/', $object[1], $position)) {
+                continue;
+            }
+
+            $font = $fonts[$fontMatch[1]] ?? null;
+            $literal = $this->literalStrings($object[1])[0] ?? null;
+            if ($font === null || $literal === null) {
+                continue;
+            }
+
+            $text = $this->decodeCompositeText($this->decodeLiteral($literal), $font['map']);
+            if ($text === null || trim($text) === '') {
+                continue;
+            }
+
+            $size = (float) $fontMatch[2];
+            $baseline = (float) $position[2];
+            $x = (float) $position[1];
+            $boxes[] = [
+                'text' => $text,
+                'x' => $x,
+                'y' => $baseline + (($font['descent'] / 1000) * $size),
+                'width' => $pageData['width'] - $x - 42,
+                'height' => (($font['ascent'] - $font['descent']) / 1000) * $size,
+            ];
+        }
+
+        return $boxes;
     }
 
     /** @return array{x: float, y: float} */
@@ -248,6 +270,51 @@ final class RenderedPdfInspector
         }
 
         return $map;
+    }
+
+    /** @return array<string, array{name: string, map: array<string, string|false>, ascent: float, descent: float}> */
+    private function pageFonts(int $page): array
+    {
+        $pageData = $this->pages[$page - 1] ?? null;
+        if ($pageData === null) {
+            throw new RuntimeException('The rendered PDF page does not exist.');
+        }
+
+        $pageObject = $this->objects[$pageData['object']];
+        $resourceObject = $pageObject;
+        if (preg_match('/\/Resources (\d+) 0 R/', $pageObject, $resourceReference)) {
+            $resourceObject = $this->objects[(int) $resourceReference[1]] ?? '';
+        }
+
+        preg_match_all('/\/(F\d+)\s+(\d+)\s+0\s+R/', $resourceObject, $references, PREG_SET_ORDER);
+        $fonts = [];
+        foreach ($references as $reference) {
+            $fontObject = $this->objects[(int) $reference[2]] ?? '';
+            if (! preg_match('/\/BaseFont \/([^\s\/]+)/', $fontObject, $baseFont)
+                || ! preg_match('/\/ToUnicode (\d+) 0 R/', $fontObject, $unicodeReference)
+                || ! preg_match('/\/DescendantFonts \[(\d+) 0 R\]/', $fontObject, $descendantReference)) {
+                continue;
+            }
+
+            $descendant = $this->objects[(int) $descendantReference[1]] ?? '';
+            if (! preg_match('/\/FontDescriptor (\d+) 0 R/', $descendant, $descriptorReference)) {
+                continue;
+            }
+            $descriptor = $this->objects[(int) $descriptorReference[1]] ?? '';
+            if (! preg_match('/\/Ascent (-?[\d.]+)/', $descriptor, $ascent)
+                || ! preg_match('/\/Descent (-?[\d.]+)/', $descriptor, $descent)) {
+                continue;
+            }
+
+            $fonts[$reference[1]] = [
+                'name' => preg_replace('/^[A-Z]{6}\+/', '', $baseFont[1]) ?? $baseFont[1],
+                'map' => $this->unicodeMap((int) $unicodeReference[1]),
+                'ascent' => (float) $ascent[1],
+                'descent' => (float) $descent[1],
+            ];
+        }
+
+        return $fonts;
     }
 
     public function renderedText(?int $page = null): string
