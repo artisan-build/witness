@@ -20,9 +20,9 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
-final class SaveSignerFields
+final readonly class SaveSignerFields
 {
-    public function __construct(private readonly PdfFontCoverage $fontCoverage) {}
+    public function __construct(private PdfFontCoverage $fontCoverage) {}
 
     /** @param array<string|int, mixed> $responses */
     public function handle(
