@@ -264,41 +264,62 @@ final readonly class PdfCompletionRenderer
         $pageCount = 0;
         $y = 0.0;
         foreach ($wrapped as $line) {
-            if ($pageCount === 0 || $y > 742) {
+            if ($pageCount === 0) {
                 $pdf->addPage(['format' => '', 'width' => 612, 'height' => 792, 'orientation' => 'P']);
                 $pageCount++;
                 $y = 42;
-
-                if ($pageCount > 1) {
-                    $pdf->page->addContent($this->textCell(
-                        pdf: $pdf,
-                        font: $font,
-                        text: 'Certificate of Completion (continued)',
-                        posx: 42,
-                        posy: $y,
-                        width: 528,
-                        height: 12,
-                        valign: 'T',
-                        halign: 'L',
-                        drawcell: false,
-                    ));
-                    $y += 16;
-                }
             }
 
-            $pdf->page->addContent($this->textCell(
+            $content = $this->textCell(
                 pdf: $pdf,
                 font: $font,
                 text: $line,
                 posx: 42,
                 posy: $y,
                 width: 528,
-                height: 11,
+                height: 0,
                 valign: 'T',
                 halign: 'L',
                 drawcell: false,
-            ));
-            $y += 11;
+            );
+            $height = $line === '' ? 11.0 : $pdf->getLastCellBBox()['h'];
+
+            if ($y + $height > 750) {
+                $pdf->addPage(['format' => '', 'width' => 612, 'height' => 792, 'orientation' => 'P']);
+                $pageCount++;
+                $y = 42;
+
+                $heading = $this->textCell(
+                    pdf: $pdf,
+                    font: $font,
+                    text: 'Certificate of Completion (continued)',
+                    posx: 42,
+                    posy: $y,
+                    width: 528,
+                    height: 0,
+                    valign: 'T',
+                    halign: 'L',
+                    drawcell: false,
+                );
+                $pdf->page->addContent($heading);
+                $y += $pdf->getLastCellBBox()['h'];
+                $content = $this->textCell(
+                    pdf: $pdf,
+                    font: $font,
+                    text: $line,
+                    posx: 42,
+                    posy: $y,
+                    width: 528,
+                    height: 0,
+                    valign: 'T',
+                    halign: 'L',
+                    drawcell: false,
+                );
+                $height = $line === '' ? 11.0 : $pdf->getLastCellBBox()['h'];
+            }
+
+            $pdf->page->addContent($content);
+            $y += $height;
         }
 
         return $pageCount;
