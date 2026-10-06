@@ -15,7 +15,7 @@ final class McpAccess
 {
     public function user(WitnessMcpAbility $ability): ?User
     {
-        $request = app('request');
+        $request = resolve('request');
 
         if (! $request instanceof Request) {
             return null;

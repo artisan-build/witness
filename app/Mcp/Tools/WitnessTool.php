@@ -52,7 +52,7 @@ abstract class WitnessTool extends Tool
 
     protected function access(): McpAccess
     {
-        return app(McpAccess::class);
+        return resolve(McpAccess::class);
     }
 
     /** @param list<string> $allowed */

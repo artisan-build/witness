@@ -66,7 +66,7 @@ function bindWitnessMcpCredential(?User $user, array $abilities): Credential
         'user_id' => $user === null ? null : (string) $user->getKey(),
     ]);
 
-    $request = app('request');
+    $request = resolve('request');
     expect($request)->toBeInstanceOf(HttpRequest::class);
     $request->setUserResolver(static fn (): Credential => $credential);
 
@@ -137,7 +137,7 @@ function witnessDelegatedAssertion(): string
     }
 
     /** @var AsymmetricSecretKey $key */
-    $key = app('witness.testing.console-key');
+    $key = resolve('witness.testing.console-key');
     $now = CarbonImmutable::now();
 
     return (new Builder)
@@ -161,7 +161,7 @@ function witnessDelegatedAssertion(): string
 }
 
 it('registers the exact effect-scoped MCP doors and six conforming tools', function (): void {
-    $routes = collect(app('router')->getRoutes()->getRoutes())
+    $routes = collect(resolve('router')->getRoutes()->getRoutes())
         ->filter(fn ($route): bool => in_array('POST', $route->methods(), true) && str_starts_with($route->uri(), 'mcp'))
         ->values();
 
@@ -175,7 +175,7 @@ it('registers the exact effect-scoped MCP doors and six conforming tools', funct
         ->and(config('built-for-cloud.mcp.destructive_path'))->toBe('/mcp/destructive')
         ->and(config('built-for-cloud.mcp.delegated'))->toBeTrue()
         ->and(config('built-for-cloud.mcp.two_phase.cache_store'))->toBe('database')
-        ->and(app(CredentialAbilityRegistry::class)->all())->toBe([
+        ->and(resolve(CredentialAbilityRegistry::class)->all())->toBe([
             WitnessMcpAbility::Read->value,
             WitnessMcpAbility::Destructive->value,
         ]);
@@ -200,13 +200,13 @@ it('registers the exact effect-scoped MCP doors and six conforming tools', funct
     ]);
 
     foreach ([ListTemplates::class, ListEnvelopes::class, EnvelopeStatus::class, SendFromTemplate::class, Remind::class, VoidEnvelope::class] as $toolClass) {
-        $tool = app($toolClass)->toArray();
+        $tool = resolve($toolClass)->toArray();
         expect($tool['inputSchema']['additionalProperties'])->toBeFalse()
             ->and($tool['_meta']['classification'])->toBe('content');
     }
 
     foreach ([SendFromTemplate::class, Remind::class, VoidEnvelope::class] as $toolClass) {
-        $tool = app($toolClass)->toArray();
+        $tool = resolve($toolClass)->toArray();
         expect($tool['_meta']['effect'])->toBe('destructive')
             ->and($tool['_meta'][TwoPhase::META_KEY]['confirmationArgument'])->toBe('confirm')
             ->and($tool['inputSchema']['properties'])->toHaveKey('confirm');
@@ -266,12 +266,12 @@ it('refuses unbound and wrong-ability credentials before any Witness domain quer
         }
     });
 
-    $response = app(ListTemplates::class)->handle(new Request);
+    $response = resolve(ListTemplates::class)->handle(new Request);
     expect($response->isError())->toBeTrue()->and($queries)->toBeEmpty();
 
     $user = UserFactory::new()->create();
     bindWitnessMcpCredential($user, ['witness.read.lookalike']);
-    $response = app(ListEnvelopes::class)->handle(new Request);
+    $response = resolve(ListEnvelopes::class)->handle(new Request);
     expect($response->isError())->toBeTrue()->and($queries)->toBeEmpty();
 });
 
@@ -367,10 +367,10 @@ it('bounds deterministic reads to caller-owned records in current teams', functi
     $removedTeam->users()->detach($sender);
     bindWitnessMcpCredential($sender, [WitnessMcpAbility::Read->value]);
 
-    $templates = app(ListTemplates::class)->handle(new Request);
-    $envelopes = app(ListEnvelopes::class)->handle(new Request(['status' => EnvelopeStatusEnum::Draft->value]));
-    $status = app(EnvelopeStatus::class)->handle(new Request(['envelope_id' => $visibleEnvelope->getKey()]));
-    $foreignStatus = app(EnvelopeStatus::class)->handle(new Request(['envelope_id' => $visibleEnvelope->getKey() + 2]));
+    $templates = resolve(ListTemplates::class)->handle(new Request);
+    $envelopes = resolve(ListEnvelopes::class)->handle(new Request(['status' => EnvelopeStatusEnum::Draft->value]));
+    $status = resolve(EnvelopeStatus::class)->handle(new Request(['envelope_id' => $visibleEnvelope->getKey()]));
+    $foreignStatus = resolve(EnvelopeStatus::class)->handle(new Request(['envelope_id' => $visibleEnvelope->getKey() + 2]));
 
     expect($templates)->toBeInstanceOf(ResponseFactory::class)
         ->and($templates->getStructuredContent()['templates'])->toHaveCount(1)
@@ -413,12 +413,12 @@ it('uses the same closed validation before destructive preview and execution', f
     $user = UserFactory::new()->create();
     bindWitnessMcpCredential($user, [WitnessMcpAbility::Destructive->value]);
     $cases = [
-        [app(SendFromTemplate::class), new Request([
+        [resolve(SendFromTemplate::class), new Request([
             'template_id' => 1,
             'roles' => [['role' => 'Signer', 'name' => "Invalid\x0BName", 'email' => 'signer@example.test']],
         ])],
-        [app(Remind::class), new Request(['envelope_id' => 1, 'unexpected' => true])],
-        [app(VoidEnvelope::class), new Request(['envelope_id' => 1, 'reason' => '   '])],
+        [resolve(Remind::class), new Request(['envelope_id' => 1, 'unexpected' => true])],
+        [resolve(VoidEnvelope::class), new Request(['envelope_id' => 1, 'reason' => '   '])],
     ];
 
     foreach ($cases as [$tool, $request]) {
@@ -490,7 +490,7 @@ it('keeps short token and OTP canaries out of responses logs and session data', 
     $handler = new TestHandler;
     $logger = new MonologLogger('witness-mcp-test');
     $logger->pushHandler($handler);
-    Log::swap(new IlluminateLogger($logger, app('events')));
+    Log::swap(new IlluminateLogger($logger, resolve('events')));
     $credential = createWitnessMcpCredential($envelope->sender, [WitnessMcpAbility::Read->value]);
 
     $success = callWitnessMcpTool('/mcp', $credential['plaintext'], 'envelope_status', [
@@ -504,7 +504,7 @@ it('keeps short token and OTP canaries out of responses logs and session data', 
         'success' => $success->json(),
         'error' => $error->json(),
         'logs' => $handler->getRecords(),
-        'session' => app('session')->all(),
+        'session' => resolve('session')->all(),
     ], JSON_THROW_ON_ERROR);
 
     expect(strlen($tokenCanary))->toBeLessThanOrEqual(9)
@@ -535,7 +535,7 @@ it('instantiates and sends the NDA-style template without exposing or reusing it
     $client->fields()->create(['page' => 1, 'type' => FieldType::Signature, 'required' => true, 'position_x' => .1, 'position_y' => .2, 'width' => .3, 'height' => .1]);
     $company->fields()->create(['page' => 2, 'type' => FieldType::Initials, 'required' => true, 'position_x' => .5, 'position_y' => .6, 'width' => .2, 'height' => .1]);
 
-    $envelope = app(InstantiateAndSendTemplate::class)->handle($sender, $template->getKey(), [
+    $envelope = resolve(InstantiateAndSendTemplate::class)->handle($sender, $template->getKey(), [
         ['role' => 'Client', 'name' => 'Client Person', 'email' => 'client@example.test'],
         ['role' => 'Company', 'name' => 'Company Person', 'email' => 'company@example.test'],
     ], 'Review this NDA.', null);
@@ -547,7 +547,7 @@ it('instantiates and sends the NDA-style template without exposing or reusing it
         ->and($envelope->signers->pluck('role_label')->all())->toBe(['Client', 'Company'])
         ->and($envelope->fields()->count())->toBe(2);
 
-    expect(fn () => app(InstantiateAndSendTemplate::class)->handle($sender, $template->getKey(), [
+    expect(fn () => resolve(InstantiateAndSendTemplate::class)->handle($sender, $template->getKey(), [
         ['role' => 'Client', 'name' => 'Only One', 'email' => 'only@example.test'],
     ], null, null))->toThrow(ValidationException::class);
 
@@ -559,7 +559,7 @@ it('instantiates and sends the NDA-style template without exposing or reusing it
         'original_sha256' => hash('sha256', $pdf),
     ]);
     $unsendable->roles()->create(['label' => 'Signer', 'position' => 0]);
-    expect(fn () => app(InstantiateAndSendTemplate::class)->handle($sender, $unsendable->getKey(), [
+    expect(fn () => resolve(InstantiateAndSendTemplate::class)->handle($sender, $unsendable->getKey(), [
         ['role' => 'Signer', 'name' => 'No Fields', 'email' => 'no-fields@example.test'],
     ], null, null))->toThrow(DomainException::class);
     expect(Envelope::query()->count())->toBe(1)->and(Storage::allFiles())->toHaveCount(2);
@@ -679,7 +679,7 @@ it('reminds only eligible signers and reports sent and unknown handoffs truthful
         'width' => .3,
         'height' => .08,
     ]);
-    app(SendEnvelope::class)->handle($envelope->team, $envelope->sender, $envelope->getKey());
+    resolve(SendEnvelope::class)->handle($envelope->team, $envelope->sender, $envelope->getKey());
     DB::transaction(function () use ($terminal): void {
         DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
         DB::table('signers')->where('id', $terminal->getKey())->update([
@@ -756,12 +756,12 @@ it('gives destructive tools zero effects for known foreign ids', function (): vo
     $auditsBefore = $foreignEnvelope->auditEvents()->count();
     $mailBefore = Mail::sent(SigningInvitation::class)->count();
 
-    $send = app(SendFromTemplate::class)->handle(new Request([
+    $send = resolve(SendFromTemplate::class)->handle(new Request([
         'template_id' => $foreignTemplate->getKey(),
         'roles' => [['role' => 'Signer', 'name' => 'No Access', 'email' => 'none@example.test']],
     ]));
-    $remind = app(Remind::class)->handle(new Request(['envelope_id' => $foreignEnvelope->getKey()]));
-    $void = app(VoidEnvelope::class)->handle(new Request([
+    $remind = resolve(Remind::class)->handle(new Request(['envelope_id' => $foreignEnvelope->getKey()]));
+    $void = resolve(VoidEnvelope::class)->handle(new Request([
         'envelope_id' => $foreignEnvelope->getKey(),
         'reason' => 'No access',
     ]));
