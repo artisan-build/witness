@@ -25,6 +25,7 @@ class Signer extends Model
         'name',
         'email',
         'role_label',
+        'position',
         'status',
         'link_token_hash',
         'otp_hash',
@@ -37,21 +38,17 @@ class Signer extends Model
 
     protected static function booted(): void
     {
+        static::creating(fn (Signer $signer) => $signer->assertDraftEnvelope('Signers can only be added to draft envelopes.'));
         static::updating(function (Signer $signer): void {
             if ($signer->isDirty('envelope_id')) {
                 throw new DomainException('Signer envelope identity is immutable.');
             }
-        });
-        static::deleting(function (Signer $signer): void {
-            $isFrozen = Envelope::query()
-                ->whereKey($signer->envelope_id)
-                ->where('status', '!=', EnvelopeStatus::Draft->value)
-                ->exists();
 
-            if ($isFrozen) {
-                throw new DomainException('Signers cannot be removed after send.');
+            if ($signer->isDirty(['name', 'email', 'role_label', 'position'])) {
+                $signer->assertDraftEnvelope('Signer definitions cannot be changed after send.');
             }
         });
+        static::deleting(fn (Signer $signer) => $signer->assertDraftEnvelope('Signers cannot be removed after send.'));
     }
 
     /** @return BelongsTo<Envelope, $this> */
@@ -66,10 +63,23 @@ class Signer extends Model
         return $this->hasMany(Field::class);
     }
 
+    private function assertDraftEnvelope(string $message): void
+    {
+        $isDraft = Envelope::query()
+            ->whereKey($this->envelope_id)
+            ->where('status', EnvelopeStatus::Draft->value)
+            ->exists();
+
+        if (! $isDraft) {
+            throw new DomainException($message);
+        }
+    }
+
     protected function casts(): array
     {
         return [
             'status' => SignerStatus::class,
+            'position' => 'integer',
             'otp_expires_at' => 'immutable_datetime',
             'otp_attempts' => 'integer',
             'otp_locked_at' => 'immutable_datetime',

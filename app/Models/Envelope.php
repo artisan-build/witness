@@ -45,6 +45,11 @@ class Envelope extends Model
             if ($envelope->isDirty(['team_id', 'sender_id', 'status'])) {
                 throw new \DomainException('Envelope ownership and status require a domain action.');
             }
+
+            if ($envelope->getRawOriginal('status') !== EnvelopeStatus::Draft->value
+                && $envelope->isDirty(['title', 'message', 'expires_at'])) {
+                throw new \DomainException('Envelope details cannot be changed after send.');
+            }
         });
     }
 

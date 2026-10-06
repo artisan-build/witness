@@ -1,3 +1,43 @@
 <?php
 
 declare(strict_types=1);
+
+use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\EnvelopeController;
+use App\Http\Controllers\TeamSelectionController;
+use App\Http\Controllers\TemplateController;
+use App\Http\Middleware\EnsureSelectedTeam;
+use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
+use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
+use Illuminate\Support\Facades\Route;
+
+Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])->group(function (): void {
+    Route::get('/teams/select', [TeamSelectionController::class, 'index'])->name('sender.teams.select');
+    Route::post('/teams/select', [TeamSelectionController::class, 'store'])->name('sender.teams.store');
+
+    Route::middleware(EnsureSelectedTeam::class)->group(function (): void {
+        Route::get('/app', [EnvelopeController::class, 'index'])->name('sender.dashboard');
+        Route::get('/envelopes/new', [EnvelopeController::class, 'create'])->name('sender.envelopes.create');
+        Route::post('/envelopes', [EnvelopeController::class, 'store'])->name('sender.envelopes.store');
+        Route::get('/envelopes/{envelope}', [EnvelopeController::class, 'edit'])->name('sender.envelopes.edit');
+        Route::put('/envelopes/{envelope}', [EnvelopeController::class, 'update'])->name('sender.envelopes.update');
+        Route::put('/envelopes/{envelope}/document', [EnvelopeController::class, 'replaceDocument'])->name('sender.envelopes.document');
+        Route::put('/envelopes/{envelope}/signers', [EnvelopeController::class, 'updateSigners'])->name('sender.envelopes.signers');
+        Route::put('/envelopes/{envelope}/fields', [EnvelopeController::class, 'updateFields'])->name('sender.envelopes.fields');
+        Route::post('/envelopes/{envelope}/send', [EnvelopeController::class, 'send'])->name('sender.envelopes.send');
+        Route::post('/envelopes/{envelope}/template', [EnvelopeController::class, 'saveAsTemplate'])->name('sender.envelopes.template');
+        Route::get('/envelopes/{envelope}/document', [DocumentController::class, 'envelope'])->name('sender.envelopes.document.show');
+
+        Route::get('/templates', [TemplateController::class, 'index'])->name('sender.templates.index');
+        Route::get('/templates/new', [TemplateController::class, 'create'])->name('sender.templates.create');
+        Route::post('/templates', [TemplateController::class, 'store'])->name('sender.templates.store');
+        Route::get('/templates/{template}', [TemplateController::class, 'edit'])->name('sender.templates.edit');
+        Route::put('/templates/{template}', [TemplateController::class, 'update'])->name('sender.templates.update');
+        Route::put('/templates/{template}/document', [TemplateController::class, 'replaceDocument'])->name('sender.templates.document.update');
+        Route::put('/templates/{template}/roles', [TemplateController::class, 'updateRoles'])->name('sender.templates.roles');
+        Route::put('/templates/{template}/fields', [TemplateController::class, 'updateFields'])->name('sender.templates.fields');
+        Route::get('/templates/{template}/send', [TemplateController::class, 'sendForm'])->name('sender.templates.send-form');
+        Route::post('/templates/{template}/send', [TemplateController::class, 'instantiate'])->name('sender.templates.send');
+        Route::get('/templates/{template}/document', [DocumentController::class, 'template'])->name('sender.templates.document');
+    });
+});

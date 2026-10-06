@@ -12,4 +12,9 @@ enum EnvelopeStatus: string
     case Declined = 'declined';
     case Voided = 'voided';
     case Expired = 'expired';
+
+    public function isDraft(): bool
+    {
+        return $this === self::Draft;
+    }
 }
