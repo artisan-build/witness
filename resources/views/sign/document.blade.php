@@ -22,13 +22,34 @@
             <span>Page <strong data-page-number>1</strong> of <span data-page-count>...</span></span>
             <button type="button" data-page-next>Next</button>
         </div>
-        <div class="signing-pdf-stage"><canvas data-testid="signer-pdf-canvas"></canvas></div>
+        <div class="signing-pdf-stage" data-pdf-stage>
+            <canvas data-testid="signer-pdf-canvas"></canvas>
+            <div class="signing-field-overlays" data-testid="signer-field-overlays" aria-label="Your fields on this page">
+                @foreach ($signer->fields->sortBy(['page', 'id']) as $field)
+                    <button type="button"
+                            class="signing-field-overlay"
+                            data-testid="signer-field-overlay"
+                            data-field-id="{{ $field->getKey() }}"
+                            data-field-page="{{ $field->page }}"
+                            aria-label="{{ str($field->type->value)->replace('_', ' ')->title() }} field on page {{ $field->page }}"
+                            style="left: {{ (float) $field->position_x * 100 }}%; top: {{ (float) $field->position_y * 100 }}%; width: {{ (float) $field->width * 100 }}%; height: {{ (float) $field->height * 100 }}%;">
+                        <span>{{ str($field->type->value)->replace('_', ' ')->title() }}</span>
+                    </button>
+                @endforeach
+            </div>
+        </div>
     </section>
 
     <form method="POST" action="{{ route('sign.fields') }}" class="signing-fields" data-testid="signer-fields">
         @csrf
         @foreach ($signer->fields->sortBy(['page', 'id']) as $field)
-            <fieldset class="signing-card signing-field" data-testid="signer-field" data-field-type="{{ $field->type->value }}">
+            <fieldset id="signer-field-{{ $field->getKey() }}"
+                      class="signing-card signing-field"
+                      data-testid="signer-field"
+                      data-field-id="{{ $field->getKey() }}"
+                      data-field-page="{{ $field->page }}"
+                      data-field-type="{{ $field->type->value }}"
+                      tabindex="-1">
                 <legend>{{ str($field->type->value)->replace('_', ' ')->title() }} · page {{ $field->page }} @if($field->required) <span>Required</span> @endif</legend>
 
                 @if ($field->type === \App\Enums\FieldType::Text)

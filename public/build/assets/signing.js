@@ -10,7 +10,19 @@ if (viewer) {
     const count = viewer.querySelector('[data-page-count]');
     const previous = viewer.querySelector('[data-page-prev]');
     const next = viewer.querySelector('[data-page-next]');
+    const stage = viewer.querySelector('[data-pdf-stage]');
+    const overlays = [...viewer.querySelectorAll('[data-testid="signer-field-overlay"]')];
+    const fieldsets = [...document.querySelectorAll('[data-testid="signer-field"]')];
     let pageNumber = 1;
+    let focusedFieldId = null;
+
+    const syncOverlays = () => {
+        overlays.forEach((overlay) => {
+            const visible = Number(overlay.dataset.fieldPage) === pageNumber;
+            overlay.hidden = !visible;
+            overlay.classList.toggle('is-focused', visible && overlay.dataset.fieldId === focusedFieldId);
+        });
+    };
 
     try {
         const documentProxy = await pdfjsLib.getDocument({
@@ -24,10 +36,13 @@ if (viewer) {
             const viewport = pageProxy.getViewport({ scale: 1.6 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
+            stage.style.width = `${viewport.width}px`;
+            stage.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
             await pageProxy.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
             current.textContent = String(pageNumber);
             previous.disabled = pageNumber === 1;
             next.disabled = pageNumber === documentProxy.numPages;
+            syncOverlays();
         };
 
         previous.addEventListener('click', async () => {
@@ -37,6 +52,27 @@ if (viewer) {
         next.addEventListener('click', async () => {
             if (pageNumber < documentProxy.numPages) pageNumber++;
             await render();
+        });
+        overlays.forEach((overlay) => {
+            overlay.addEventListener('click', () => {
+                const fieldset = document.querySelector(`#signer-field-${overlay.dataset.fieldId}`);
+                const focusTarget = fieldset?.querySelector('input, textarea, button') ?? fieldset;
+                focusTarget?.focus();
+            });
+        });
+        fieldsets.forEach((fieldset) => {
+            fieldset.addEventListener('focusin', async () => {
+                focusedFieldId = fieldset.dataset.fieldId;
+                const fieldPage = Number(fieldset.dataset.fieldPage);
+                if (fieldPage !== pageNumber) {
+                    pageNumber = fieldPage;
+                    await render();
+                } else {
+                    syncOverlays();
+                }
+                viewer.querySelector(`[data-testid="signer-field-overlay"][data-field-id="${focusedFieldId}"]`)
+                    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            });
         });
         await render();
     } catch {

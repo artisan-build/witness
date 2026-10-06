@@ -10,7 +10,7 @@
 
     <form method="GET" action="{{ route('sender.dashboard') }}" class="witness-inline-form" data-testid="status-filter">
         <label for="status">Status</label>
-        <select class="witness-select" id="status" name="status">
+        <select class="witness-select witness-status-select" id="status" name="status">
             <option value="">All</option>
             @foreach (\App\Enums\EnvelopeStatus::cases() as $option)
                 <option value="{{ $option->value }}" @selected($status === $option->value)>{{ str($option->value)->replace('_', ' ')->title() }}</option>

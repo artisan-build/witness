@@ -72,6 +72,12 @@
         "fonts": [
             "@php artisan witness:prepare-pdf-fonts --no-interaction"
         ],
+        "docs": [
+            "@php scripts/generate-setup-docs.php"
+        ],
+        "docs:check": [
+            "@php scripts/generate-setup-docs.php --check"
+        ],
         "test:lint": [
             "pint --parallel --test"
         ],

@@ -3,7 +3,7 @@
         <div>
             <p class="witness-kicker">Envelope #{{ $envelope->getKey() }}</p>
             <h1>{{ $envelope->title }}</h1>
-            <p>{{ $envelope->document?->original_name }} &middot; {{ $envelope->document?->page_count }} pages</p>
+            <p>{{ $envelope->document?->original_name }} &middot; {{ $envelope->document?->page_count }} {{ Str::plural('page', $envelope->document?->page_count) }}</p>
         </div>
         <span class="witness-status witness-status-{{ $envelope->status->value }}">{{ ucfirst($envelope->status->value) }}</span>
     </header>
@@ -29,7 +29,7 @@
                         @csrf
                         @method('PUT')
                         <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
-                        <flux:button type="submit">Replace</flux:button>
+                        <flux:button type="submit" variant="primary">Replace</flux:button>
                     </form>
                 @endif
             </section>
@@ -59,7 +59,7 @@
                             </template>
                         </div>
                         <div class="witness-actions">
-                            <flux:button type="button" x-on:click="add()">Add signer</flux:button>
+                            <flux:button type="button" variant="primary" x-on:click="add()">Add signer</flux:button>
                             <flux:button type="submit" variant="primary">Save signers</flux:button>
                         </div>
                     </form>
@@ -160,7 +160,7 @@
                 <form method="POST" action="{{ route('sender.envelopes.template', $envelope) }}" class="witness-stack">
                     @csrf
                     <flux:input name="name" label="Template name" required />
-                    <flux:button type="submit">Save as template</flux:button>
+                    <flux:button type="submit" variant="primary">Save as template</flux:button>
                 </form>
             @else
                 <p class="witness-frozen">Sent {{ $envelope->sent_at?->diffForHumans() }}. Document and fields are locked.</p>
@@ -177,7 +177,7 @@
                 <form method="POST" action="{{ route('sender.envelopes.void', $envelope) }}" class="witness-stack" data-testid="void-envelope">
                     @csrf
                     <flux:textarea name="reason" label="Reason for voiding" required />
-                    <button class="witness-button" type="submit">Void envelope</button>
+                    <flux:button type="submit" variant="danger">Void envelope</flux:button>
                 </form>
             @elseif ($envelope->status === \App\Enums\EnvelopeStatus::CompletionFailed)
                 <div data-testid="completion-failed"><strong>Completion failed.</strong> Your signatures and audit evidence are preserved.</div>
@@ -187,7 +187,7 @@
             @endif
 
             @foreach ($envelope->mailDeliveries->where('status', \App\Enums\MailDeliveryStatus::Unknown)->where('purpose', \App\Enums\MailDeliveryPurpose::FinalDocument) as $delivery)
-                <form method="POST" action="{{ route('sender.envelopes.deliveries.resend', [$envelope, $delivery]) }}" class="witness-stack" data-testid="unknown-delivery-recovery">
+                <form method="POST" action="{{ route('sender.envelopes.deliveries.resend', [$envelope, $delivery]) }}" class="witness-stack witness-recovery" data-testid="unknown-delivery-recovery">
                     @csrf
                     <p>Delivery to {{ $delivery->recipient_name }} is unknown. It may already have succeeded; resending can create a duplicate.</p>
                     <label><input type="checkbox" name="confirm_duplicate_risk" value="1" required> I understand the duplicate-delivery risk.</label>
@@ -200,7 +200,7 @@
                 ->groupBy(fn ($delivery) => $delivery->recipient_kind.'|'.$delivery->recipient_email)
                 ->map(fn ($deliveries) => $deliveries->sortByDesc('generation')->first())
                 ->where('status', \App\Enums\MailDeliveryStatus::Sent) as $delivery)
-                <form method="POST" action="{{ route('sender.envelopes.deliveries.reissue-link', [$envelope, $delivery]) }}" class="witness-stack" data-testid="final-link-reissue">
+                <form method="POST" action="{{ route('sender.envelopes.deliveries.reissue-link', [$envelope, $delivery]) }}" class="witness-stack witness-recovery" data-testid="final-link-reissue">
                     @csrf
                     <p>Issue {{ $delivery->recipient_name }} a fresh final-document link without creating another final PDF.</p>
                     <button class="witness-button" type="submit">Issue fresh final-document link</button>
@@ -208,7 +208,7 @@
             @endforeach
 
             @if ($envelope->status->isDeletable())
-                <a class="witness-button witness-button-small" href="{{ route('sender.envelopes.delete', $envelope) }}" data-testid="delete-envelope">Delete envelope</a>
+                <flux:button :href="route('sender.envelopes.delete', $envelope)" variant="danger" size="sm" data-testid="delete-envelope">Delete envelope</flux:button>
             @endif
         </aside>
     </div>

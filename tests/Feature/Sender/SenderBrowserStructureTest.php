@@ -50,7 +50,15 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('wire:name="sender.envelope-editor"', false)
         ->assertSee('x-data="witnessPlacement', false)
         ->assertSee('data-flux-button', false)
+        ->assertSee('2 pages')
         ->assertSee('build/assets/sender.js');
+
+    $document = new DOMDocument;
+    @$document->loadHTML((string) $envelopeResponse->getContent());
+    $xpath = new DOMXPath($document);
+    foreach (['Replace', 'Add signer', 'Save signers', 'Save as template'] as $label) {
+        expect($xpath->query('//*[@data-flux-button and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
+    }
 
     $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
         ->assertSee('<button class="witness-button" type="submit" data-testid="save-fields">Save placements</button>', false)
@@ -104,15 +112,19 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->and($senderStyles)->toContain('.witness-status-declined')
         ->and($senderStyles)->toContain('.witness-status-voided')
         ->and($senderStyles)->toContain('.witness-status-expired')
-        ->and($dashboardView)->toContain('<select class="witness-select"', '<button class="witness-button" type="submit">Filter</button>')
+        ->and($dashboardView)->toContain('<select class="witness-select witness-status-select"', '<button class="witness-button" type="submit">Filter</button>')
         ->and($setupView)->toContain('<button class="witness-button" type="submit">Send me a test email</button>')
-        ->and($deleteView)->toContain('<button class="witness-button" type="submit">Permanently delete</button>')
+        ->and($deleteView)->toContain('<flux:button type="submit" variant="danger">Permanently delete</flux:button>')
         ->and($envelopeView)->toContain(
             '<button class="witness-button witness-button-small" type="submit">Resend link</button>',
-            '<button class="witness-button" type="submit">Void envelope</button>',
             '<button class="witness-button" type="submit">Retry completion</button>',
             '<button class="witness-button" type="submit">Create a new delivery generation</button>',
             '<button class="witness-button" type="submit">Issue fresh final-document link</button>',
+        )
+        ->and($envelopeView)->toContain(
+            '<flux:button type="submit" variant="danger">Void envelope</flux:button>',
+            'class="witness-stack witness-recovery"',
+            'variant="danger" size="sm" data-testid="delete-envelope"',
         )
         ->and($canvasWidth)->toBeInt()
         ->and($canvasHeight)->toBeInt()
@@ -121,4 +133,39 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     assert(is_int($canvasWidth) && is_int($canvasHeight) && is_int($render));
     expect($canvasWidth)->toBeLessThan($render)
         ->and($canvasHeight)->toBeLessThan($render);
+});
+
+it('inflects one-page envelope and template copy', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $team = Team::factory()->create();
+    $team->users()->attach($user);
+    $pdf = PdfFixture::make();
+    $path = 'documents/'.$team->getKey().'/single-page.pdf';
+    Storage::put($path, $pdf, ['visibility' => 'private']);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        $team,
+        $user,
+        'Single page envelope',
+        'single-page.pdf',
+        $path,
+        strlen($pdf),
+        1,
+        hash('sha256', $pdf),
+    );
+    $template = Template::factory()->forOwner($team, $user)->create([
+        'original_name' => 'single-page-template.pdf',
+        'page_count' => 1,
+    ]);
+
+    $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
+        ->get(route('sender.envelopes.edit', $envelope))
+        ->assertOk()
+        ->assertSeeText('single-page.pdf · 1 page')
+        ->assertDontSee('1 pages');
+    $this->get(route('sender.templates.edit', $template))
+        ->assertOk()
+        ->assertSeeText('single-page-template.pdf · 1 page')
+        ->assertSee('across 1 page.')
+        ->assertDontSee('1 pages');
 });

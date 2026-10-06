@@ -1,0 +1,128 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Support;
+
+final class SetupInstructions
+{
+    public const string CUSTOM_DOMAIN_URL = 'https://cloud.laravel.com/docs/custom-domains';
+
+    /**
+     * @return list<array{
+     *     id: string,
+     *     title: string,
+     *     paragraphs: list<string>,
+     *     bullets: list<string>,
+     *     link: array{label: string, url: string}|null
+     * }>
+     */
+    public static function sections(): array
+    {
+        return [
+            [
+                'id' => 'custom-domain',
+                'title' => 'Set a permanent custom domain first',
+                'paragraphs' => [
+                    'Set a permanent custom domain before sending your first envelope. Signing links and the verify URL printed on every Certificate of Completion preserve the current host permanently.',
+                ],
+                'bullets' => [],
+                'link' => [
+                    'label' => 'Open the Laravel Cloud custom-domain instructions',
+                    'url' => self::CUSTOM_DOMAIN_URL,
+                ],
+            ],
+            [
+                'id' => 'email',
+                'title' => 'Choose how email is sent',
+                'paragraphs' => [
+                    'Scalpels sending is the default. Witness sends through Laravel\'s configured default mailer and does not add or modify mail transport behavior.',
+                    'To send from your own domain, change MAIL_MAILER and complete that mailer\'s normal Laravel configuration. Witness then uses the configured default mailer unchanged. This is an optional operator choice; Witness requires no additional environment value.',
+                ],
+                'bullets' => [],
+                'link' => null,
+            ],
+            [
+                'id' => 'completion-delivery',
+                'title' => 'Know the completion delivery rule',
+                'paragraphs' => [
+                    'Email providers, including Amazon SES, may enforce their own message and attachment size limits.',
+                ],
+                'bullets' => [
+                    'Witness attaches a completed PDF when it is 10 MiB or smaller.',
+                    'For a completed PDF larger than 10 MiB, Witness sends a private signed download link instead.',
+                ],
+                'link' => null,
+            ],
+            [
+                'id' => 'signature-scope',
+                'title' => 'Use simple electronic signatures appropriately',
+                'paragraphs' => [
+                    'Witness produces a simple electronic signature. It does not provide an advanced or qualified signature, a digital seal, notarisation, witnessing for deeds, or identity-document verification.',
+                    'Witness does not provide legal advice. Confirm that electronic signatures are appropriate for each document and jurisdiction.',
+                    'Some classes of documents are excluded from electronic-signature laws. Examples include wills, codicils, testamentary trusts, family-law matters, court documents, and notices of default or eviction. This list is illustrative, not exhaustive.',
+                ],
+                'bullets' => [],
+                'link' => null,
+            ],
+            [
+                'id' => 'audit-and-verify',
+                'title' => 'Understand the audit trail and verification',
+                'paragraphs' => [
+                    'The database audit chain is tamper-evident except against someone who controls the database and recomputes the chain. The final PDF delivered to each party is the durable anchor: its certificate prints the original document hash, the final-content hash, and the audit-chain head.',
+                    'At /verify, Witness hashes the uploaded PDF during the request. A match must be a completed envelope\'s final document; Witness then shows only its title, completion date, and signer names. A non-match reveals nothing. The upload is not stored, and verification is throttled by IP. An original PDF or a changed final PDF does not match.',
+                ],
+                'bullets' => [],
+                'link' => null,
+            ],
+        ];
+    }
+
+    public static function setupMarkdown(): string
+    {
+        return self::markdown(
+            'Witness Setup',
+            'Complete these steps before sending the first envelope from a new Witness installation.',
+        );
+    }
+
+    public static function scalpelsHandoffMarkdown(): string
+    {
+        return self::markdown(
+            'Witness Post-Provision Handoff',
+            'Share this deterministic handoff with the installation owner after Scalpels provisions Witness.',
+        );
+    }
+
+    private static function markdown(string $title, string $introduction): string
+    {
+        $lines = [
+            '# '.$title,
+            '',
+            '<!-- Generated by scripts/generate-setup-docs.php from App\\Support\\SetupInstructions. -->',
+            '',
+            $introduction,
+        ];
+
+        foreach (self::sections() as $section) {
+            $lines[] = '';
+            $lines[] = '## '.$section['title'];
+
+            foreach ($section['paragraphs'] as $paragraph) {
+                $lines[] = '';
+                $lines[] = $paragraph;
+            }
+
+            foreach ($section['bullets'] as $bullet) {
+                $lines[] = '- '.$bullet;
+            }
+
+            if ($section['link'] !== null) {
+                $lines[] = '';
+                $lines[] = '['.$section['link']['label'].']('.$section['link']['url'].')';
+            }
+        }
+
+        return implode("\n", $lines)."\n";
+    }
+}
