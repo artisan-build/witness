@@ -17,9 +17,9 @@ use DomainException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
-final class StoreFinalDocument
+final readonly class StoreFinalDocument
 {
-    public function __construct(private readonly OutboundMailDelivery $mailDelivery) {}
+    public function __construct(private OutboundMailDelivery $mailDelivery) {}
 
     public function handle(
         Envelope $envelope,

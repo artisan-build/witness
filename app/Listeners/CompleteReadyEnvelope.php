@@ -6,12 +6,13 @@ namespace App\Listeners;
 
 use App\Events\EnvelopeReadyForCompletion;
 use App\Services\EnvelopeCompletionService;
+use ArtisanBuild\BuiltForCloud\Contracts\SystemAuthorityQueueEntry;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
-final class CompleteReadyEnvelope implements ShouldQueueAfterCommit
+final class CompleteReadyEnvelope implements ShouldQueueAfterCommit, SystemAuthorityQueueEntry
 {
     public int $tries = 3;
 

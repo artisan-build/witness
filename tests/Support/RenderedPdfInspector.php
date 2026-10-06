@@ -138,7 +138,7 @@ final class RenderedPdfInspector
 
         $text = [];
         $contentStreams = $page === null
-            ? array_map(fn (string $object): string => $this->decodeStream($object), $this->objects)
+            ? array_map($this->decodeStream(...), $this->objects)
             : [$this->pageContent($page)];
         foreach ($contentStreams as $stream) {
             if (str_contains($stream, 'begincmap')) {

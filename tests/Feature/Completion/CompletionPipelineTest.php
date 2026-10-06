@@ -26,10 +26,12 @@ use App\Services\CompletedPdf;
 use App\Services\EnvelopeCompletionService;
 use App\Services\OutboundMailDelivery;
 use App\Services\PdfCompletionRenderer;
+use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
 use ArtisanBuild\BuiltForCloud\User;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
 use Com\Tecnick\Pdf\Tcpdf;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
@@ -159,6 +161,48 @@ function completeFixtureEnvelope(
     return [$envelope->refresh(), $signer->refresh(), $rendered];
 }
 
+it('runs the queued completion listener inside system authority', function (): void {
+    config(['queue.default' => 'sync']);
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update([
+            'status' => SignerStatus::Viewed,
+            'otp_verified_at' => now()->subMinutes(2),
+            'consented_at' => now()->subMinute(),
+            'updated_at' => now(),
+        ]);
+    });
+    resolve(SaveSignerFields::class)->handle(
+        $signer->refresh(),
+        [$signer->fields()->sole()->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer']],
+        '192.0.2.11',
+        'Completion authority test',
+    );
+    Event::fakeFor(
+        fn () => resolve(SignEnvelope::class)->handle(
+            $signer->refresh(),
+            '192.0.2.11',
+            'Completion authority test',
+        ),
+        [EnvelopeReadyForCompletion::class],
+    );
+
+    $authorityStates = [];
+    DB::listen(function (QueryExecuted $query) use (&$authorityStates): void {
+        if (str_contains($query->sql, 'envelopes')) {
+            $authorityStates[] = resolve(SystemAuthorityContext::class)->active();
+        }
+    });
+
+    event(new EnvelopeReadyForCompletion($envelope->getKey()));
+
+    expect($authorityStates)->not->toBeEmpty()
+        ->and(array_unique($authorityStates))->toBe([true])
+        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Completed)
+        ->and(resolve(SystemAuthorityContext::class)->active())->toBeFalse();
+});
+
 it('completes the required PDF corpus with strict page geometry and idempotent delivery', function (string $fixture): void {
     [$envelope, , $rendered] = completeFixtureEnvelope($fixture);
     $document = $envelope->document;
@@ -285,9 +329,7 @@ it('rejects the encrypted completion fixture before any final artifact is writte
 it('uses each configured default mailer and selects attachment versus signed-link delivery by size', function (string $mailer): void {
     config(['mail.default' => $mailer]);
     [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf');
-    Mail::assertSent(CompletedDocument::class, function (CompletedDocument $mail) use ($mailer): bool {
-        return $mail->mailer === $mailer && count($mail->attachments()) === 1;
-    });
+    Mail::assertSent(CompletedDocument::class, fn (CompletedDocument $mail): bool => $mail->mailer === $mailer && count($mail->attachments()) === 1);
 
     expect(EnvelopeCompletionService::attachesFinal(10 * 1024 * 1024))->toBeTrue()
         ->and(EnvelopeCompletionService::attachesFinal((10 * 1024 * 1024) + 1))->toBeFalse();
