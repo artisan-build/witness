@@ -25,6 +25,16 @@ it('owns the application manifest UI overlay and sender dashboard target', funct
             'session_guard' => null,
             'app_purposes' => [],
         ],
+        'mcp' => [
+            'path' => '/mcp',
+            'write_path' => null,
+            'destructive_path' => '/mcp/destructive',
+            'delegated' => true,
+            'two_phase' => [
+                'cache_store' => 'database',
+                'ttl_seconds' => 300,
+            ],
+        ],
         'ui' => [
             'landing_page' => true,
             'member_management' => false,
