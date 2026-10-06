@@ -20,9 +20,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\ValidationException;
 
-final class DeclineEnvelope
+final readonly class DeclineEnvelope
 {
-    public function __construct(private readonly OutboundMailDelivery $mailDelivery) {}
+    public function __construct(private OutboundMailDelivery $mailDelivery) {}
 
     public function handle(
         Signer $boundSigner,

@@ -22,9 +22,9 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
-final class OpenSigningLink
+final readonly class OpenSigningLink
 {
-    public function __construct(private readonly OutboundMailDelivery $mailDelivery) {}
+    public function __construct(private OutboundMailDelivery $mailDelivery) {}
 
     /** @return array{signer: Signer, token_hash: string} */
     public function handle(#[\SensitiveParameter] string $token, ?string $ipAddress, ?string $userAgent): array

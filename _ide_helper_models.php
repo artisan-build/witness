@@ -186,6 +186,41 @@ namespace App\Models{
 
 namespace App\Models{
 /**
+ * @property MailDeliveryPurpose $purpose
+ * @property MailDeliveryStatus $status
+ * @property CarbonImmutable|null $attempted_at
+ * @property int $id
+ * @property int $envelope_id
+ * @property int $signer_id
+ * @property int $generation
+ * @property \Carbon\CarbonImmutable|null $sent_at
+ * @property \Carbon\CarbonImmutable|null $unknown_at
+ * @property \Carbon\CarbonImmutable|null $created_at
+ * @property \Carbon\CarbonImmutable|null $updated_at
+ * @property-read \App\Models\Envelope $envelope
+ * @property-read \App\Models\Signer $signer
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery newModelQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery newQuery()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereAttemptedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereEnvelopeId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereGeneration($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery wherePurpose($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereSentAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereSignerId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereStatus($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereUnknownAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereUpdatedAt($value)
+ * @mixin \Eloquent
+ */
+	#[\AllowDynamicProperties]
+	class IdeHelperMailDelivery {}
+}
+
+namespace App\Models{
+/**
  * @property int $id
  * @property string $disk
  * @property string $path
@@ -235,6 +270,8 @@ namespace App\Models{
  * @property-read \App\Models\Envelope $envelope
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Field> $fields
  * @property-read int|null $fields_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\MailDelivery> $mailDeliveries
+ * @property-read int|null $mail_deliveries_count
  * @method static \Database\Factories\SignerFactory factory($count = null, $state = [])
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer newQuery()
