@@ -37,6 +37,7 @@ use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Exceptions\JsonRpcException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Transport\FakeTransporter;
 use Laravel\Mcp\Transport\JsonRpcRequest;
 use Laravel\Mcp\Transport\JsonRpcResponse;
@@ -77,8 +78,10 @@ function callWitnessTwoPhaseTool(Credential $credential, array $arguments): arra
     RequestEffectCeiling::publish($http, Effect::Destructive->value);
     $server = app()->make(WitnessMcpServer::class, ['transport' => new FakeTransporter]);
     $server->start();
+    $methods = (new ReflectionProperty(Server::class, 'methods'))->getValue($server);
+    expect($methods['tools/call'])->toBe(TwoPhaseCallTool::class);
     try {
-        $response = app(TwoPhaseCallTool::class)->handle($rpc, $server->createContext());
+        $response = app($methods['tools/call'])->handle($rpc, $server->createContext());
     } catch (JsonRpcException $exception) {
         $response = $exception->toJsonRpcResponse();
     }

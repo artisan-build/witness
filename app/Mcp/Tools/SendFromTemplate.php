@@ -9,6 +9,7 @@ use App\Authorization\WitnessMcpAbility;
 use App\Enums\MailDeliveryPurpose;
 use App\Models\MailDelivery;
 use App\Models\Template;
+use App\Rules\SupportedPdfText;
 use ArtisanBuild\BuiltForCloud\Mcp\Classification;
 use ArtisanBuild\BuiltForCloud\Mcp\Effect;
 use ArtisanBuild\BuiltForCloud\Mcp\ToolClassification;
@@ -30,6 +31,8 @@ use Throwable;
 #[TwoPhase]
 final class SendFromTemplate extends WitnessTool
 {
+    private const string RFC3339_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?(?:Z|[+-]\\d{2}:\\d{2})$';
+
     protected string $name = 'send_from_template';
 
     protected string $description = 'Create and send an envelope from one caller-owned template after an exact role mapping preview.';
@@ -46,7 +49,7 @@ final class SendFromTemplate extends WitnessTool
                 'email' => $schema->string()->format('email')->max(255)->required(),
             ])->withoutAdditionalProperties())->min(1)->max(50)->required(),
             'message' => $schema->string()->max(5000),
-            'expires_at' => $schema->string()->format('date-time'),
+            'expires_at' => $schema->string()->pattern(self::RFC3339_PATTERN),
         ];
     }
 
@@ -132,10 +135,10 @@ final class SendFromTemplate extends WitnessTool
             'roles' => ['required', 'array', 'min:1', 'max:50'],
             'roles.*' => ['required', 'array:role,name,email'],
             'roles.*.role' => ['required', 'string', 'max:255', 'distinct:ignore_case'],
-            'roles.*.name' => ['required', 'string', 'max:255'],
-            'roles.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case'],
-            'message' => ['nullable', 'string', 'max:5000'],
-            'expires_at' => ['nullable', 'date', 'after:now'],
+            'roles.*.name' => ['required', 'string', 'max:255', new SupportedPdfText],
+            'roles.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case', new SupportedPdfText],
+            'message' => ['nullable', 'string', 'max:5000', new SupportedPdfText],
+            'expires_at' => ['nullable', 'string', 'regex:/'.self::RFC3339_PATTERN.'/D', 'date', 'after:now'],
         ]);
     }
 

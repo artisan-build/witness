@@ -47,7 +47,7 @@ final class EnvelopeStatus extends WitnessTool
             ->whereHas('team.users', fn ($query) => $query->whereKey($user->getKey()))
             ->with([
                 'signers' => fn ($query) => $query->orderBy('position')->orderBy('id'),
-                'auditEvents' => fn ($query) => $query->limit(500),
+                'auditEvents' => fn ($query) => $query->limit(501),
             ])
             ->first();
 
@@ -75,13 +75,13 @@ final class EnvelopeStatus extends WitnessTool
                 'signed_at' => $signer->signed_at?->toIso8601String(),
                 'declined_at' => $signer->declined_at?->toIso8601String(),
             ])->values()->all(),
-            'audit_events' => $envelope->auditEvents->map(fn (AuditEvent $event): array => [
+            'audit_events' => $envelope->auditEvents->take(500)->map(fn (AuditEvent $event): array => [
                 'sequence' => $event->sequence,
                 'type' => $event->type->value,
                 'actor_type' => $event->actor_type->value,
                 'occurred_at' => $event->occurred_at->toIso8601String(),
             ])->values()->all(),
-            'audit_events_truncated' => $envelope->auditEvents->count() === 500,
+            'audit_events_truncated' => $envelope->auditEvents->count() > 500,
         ]);
     }
 }

@@ -38,7 +38,7 @@ final class VoidEnvelope extends WitnessTool
     {
         return [
             'envelope_id' => $schema->integer()->min(1)->required(),
-            'reason' => $schema->string()->min(1)->max(1000)->required(),
+            'reason' => $schema->string()->min(1)->max(1000)->pattern('.*\\S.*')->required(),
         ];
     }
 
@@ -103,7 +103,7 @@ final class VoidEnvelope extends WitnessTool
         /** @var array{envelope_id: int, reason: string} */
         return $request->validate([
             'envelope_id' => ['required', 'integer', 'min:1'],
-            'reason' => ['required', 'string', 'min:1', 'max:1000', 'not_regex:/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/'],
+            'reason' => ['required', 'string', 'min:1', 'max:1000', 'regex:/\\S/u', 'not_regex:/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/'],
         ]);
     }
 

@@ -10,10 +10,19 @@ use App\Mcp\Tools\ListTemplates;
 use App\Mcp\Tools\Remind;
 use App\Mcp\Tools\SendFromTemplate;
 use App\Mcp\Tools\VoidEnvelope;
+use ArtisanBuild\BuiltForCloud\Mcp\TwoPhaseCallTool;
 use Laravel\Mcp\Server;
+use Laravel\Mcp\Server\Contracts\Transport;
 
 final class WitnessMcpServer extends Server
 {
+    public function __construct(Transport $transport)
+    {
+        parent::__construct($transport);
+
+        $this->addMethod('tools/call', TwoPhaseCallTool::class);
+    }
+
     protected string $name = 'Witness';
 
     protected string $version = '1.0.0';
