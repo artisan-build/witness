@@ -107,6 +107,8 @@ namespace App\Models{
  * @property string|null $created_user_agent
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
+ * @property int|null $reminder_interval_days
+ * @property \Carbon\CarbonImmutable|null $last_reminded_at
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\AuditEvent> $auditEvents
  * @property-read int|null $audit_events_count
  * @property-read \App\Models\Document|null $document
@@ -131,7 +133,9 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereCreatedUserAgent($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereExpiresAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereId($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereLastRemindedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereMessage($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereReminderIntervalDays($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereSenderId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereSentAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Envelope whereStatus($value)

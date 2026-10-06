@@ -23,7 +23,7 @@ return new class extends Migration
         DB::unprepared(<<<'SQL'
             CREATE OR REPLACE FUNCTION witness_purge_matches(target bigint) RETURNS boolean AS $$
             BEGIN
-                RETURN current_setting('witness.purge_envelope', true) = target::text;
+                RETURN COALESCE(current_setting('witness.purge_envelope', true) = target::text, false);
             END;
             $$ LANGUAGE plpgsql;
 

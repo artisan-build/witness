@@ -286,6 +286,12 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
     ]);
     [$other] = createSigningEnvelope([FieldType::Signature]);
     resolve(VoidEnvelope::class)->handle($other->team, $other->sender, (int) $other->getKey(), 'Other fixture');
+    expect(fn () => DB::transaction(fn () => DB::table('documents')->where('envelope_id', $envelope->getKey())->delete()))
+        ->toThrow(QueryException::class);
+    expect(fn () => DB::transaction(function () use ($envelope): void {
+        DB::select("SELECT set_config('witness.purge_envelope', ?, true)", [(string) ($envelope->getKey() + 1)]);
+        DB::table('documents')->where('envelope_id', $envelope->getKey())->delete();
+    }))->toThrow(QueryException::class);
     expect(fn () => DB::transaction(fn () => DB::table('envelopes')->where('id', $envelope->getKey())->delete()))
         ->toThrow(QueryException::class);
     expect(fn () => DB::transaction(function () use ($envelope): void {

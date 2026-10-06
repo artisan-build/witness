@@ -195,7 +195,7 @@ it('rejects cross-team ownership at model creation', function (): void {
         ->toThrow(DomainException::class, 'must belong');
 });
 
-it('enforces actor identity and rejects unimplemented lifecycle events', function (): void {
+it('enforces actor identity and rejects reminded events outside the active lifecycle', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     $otherEnvelope = Envelope::factory()->create();
     $otherSigner = Signer::factory()->for($otherEnvelope)->create();
@@ -212,7 +212,7 @@ it('enforces actor identity and rejects unimplemented lifecycle events', functio
             AuditEventType::Reminded,
             AuditActorType::Sender,
             $sender->getKey(),
-        ))->toThrow(DomainException::class, 'not implemented');
+        ))->toThrow(DomainException::class, 'active sent envelope');
 
     expect(VerbEvent::query()->count())->toBe(0)
         ->and(AuditEvent::query()->count())->toBe(0);
