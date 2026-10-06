@@ -61,19 +61,11 @@ final readonly class PdfCompletionRenderer
 
         /** @var Collection<int, Collection<int, Field>> $fieldsByPage */
         $fieldsByPage = $envelope->fields()->with('signer')->orderBy('id')->get()->groupBy('page');
-        $pages = [];
-        $placements = [];
 
         for ($pageNumber = 1; $pageNumber <= $sourcePageCount; $pageNumber++) {
             $template = $pdf->addPageFromImport($sourceId, $pageNumber, self::IMPORT_OPTIONS);
             $pageHeight = $template->getHeight();
             $pageWidth = $template->getWidth();
-            $pages[] = [
-                'page' => $pageNumber,
-                'width' => $pageWidth,
-                'height' => $pageHeight,
-                'rotation' => $template->getRotation(),
-            ];
 
             foreach ($fieldsByPage->get($pageNumber, collect()) as $field) {
                 if ($field->value === null || $field->completed_at === null) {
@@ -84,15 +76,6 @@ final readonly class PdfCompletionRenderer
                 $y = (float) $field->position_y * $pageHeight;
                 $width = (float) $field->width * $pageWidth;
                 $height = (float) $field->height * $pageHeight;
-                $placements[] = [
-                    'page' => $pageNumber,
-                    'type' => $field->type->value,
-                    'kind' => (string) ($field->value['kind'] ?? ''),
-                    'x' => $x,
-                    'y' => $y,
-                    'width' => $width,
-                    'height' => $height,
-                ];
 
                 if (($field->value['kind'] ?? null) === 'drawn') {
                     $image = $this->normalizedDrawing($field);
@@ -111,6 +94,13 @@ final readonly class PdfCompletionRenderer
 
                 $typed = ($field->value['kind'] ?? null) === 'typed';
                 $font = $typed ? $scriptFont : $textFont;
+                $pdf->page->addContent(sprintf(
+                    "q %F %F %F %F re W n\n",
+                    $x,
+                    $pageHeight - $y - $height,
+                    $width,
+                    $height,
+                ));
                 $pdf->page->addContent($font['out']);
                 $pdf->page->addContent($pdf->getTextCell(
                     txt: $this->fieldText($field),
@@ -123,6 +113,7 @@ final readonly class PdfCompletionRenderer
                     drawcell: false,
                     fit: 'F',
                 ));
+                $pdf->page->addContent("Q\n");
             }
         }
 
@@ -181,8 +172,6 @@ final readonly class PdfCompletionRenderer
             sourcePageCount: $sourcePageCount,
             certificatePageCount: $certificatePageCount,
             certificateChainHead: $chainHead,
-            pages: $pages,
-            placements: $placements,
         );
     }
 

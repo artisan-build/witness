@@ -19,8 +19,9 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Tests\Support\RenderedPdfInspector;
 
-it('completes and stamps every signer field type through the PR4 seam', function (): void {
+it('completes and stamps every signer field type in the rendered PDF', function (): void {
     [$envelope, $signer, $token] = createSigningEnvelope();
     expect($token)->toBeString()->not->toBe('')
         ->and($signer->link_token_hash)->toBe(hash('sha256', $token))
@@ -90,14 +91,35 @@ it('completes and stamps every signer field type through the PR4 seam', function
     $rendered = resolve(PdfCompletionRenderer::class)->render($envelope);
     $strict = new Tcpdf;
     $strictSource = $strict->setImportSourceData($rendered->bytes, ['strict_limits' => true]);
+    $inspector = new RenderedPdfInspector($rendered->bytes);
     expect($strict->getSourcePageCount($strictSource))->toBe(2 + $rendered->certificatePageCount)
         ->and($strict->getWarnings())->toBe([])
-        ->and(collect($rendered->placements)->pluck('type')->unique()->sort()->values()->all())
-        ->toBe(collect(FieldType::cases())->map->value->sort()->values()->all())
-        ->and(collect($rendered->placements)->whereIn('kind', ['typed', 'drawn'])->pluck('kind')->unique()->sort()->values()->all())
-        ->toBe(['drawn', 'typed'])
-        ->and($rendered->bytes)->not->toContain(') Tj ET /Name q Q')
-        ->and($rendered->bytes)->toContain('/Subtype /Image');
+        ->and($inspector->renderedText(1))->toContain('Alex ) Tj ET q Signer')
+        ->toContain(now()->utc()->toDateString())
+        ->toContain('X')
+        ->and($inspector->renderedText(2))->toContain('Approved ) Tj ET /Name q Q')
+        ->and($inspector->clippingRectangles(1))->toHaveCount(3)
+        ->and($inspector->clippingRectangles(2))->toHaveCount(1)
+        ->and($inspector->imageRectangles(2))->toHaveCount(1)
+        ->and($inspector->pageContent(2))->not->toContain(') Tj ET /Name q Q');
+
+    foreach ($signer->fields()->orderBy('id')->get() as $field) {
+        $page = $inspector->pages()[$field->page - 1];
+        $expected = [
+            'x' => (float) $field->position_x * $page['width'],
+            'y' => $page['height'] - (((float) $field->position_y + (float) $field->height) * $page['height']),
+            'width' => (float) $field->width * $page['width'],
+            'height' => (float) $field->height * $page['height'],
+        ];
+        $rectangles = $field->type === FieldType::Initials
+            ? $inspector->imageRectangles($field->page)
+            : $inspector->clippingRectangles($field->page);
+        $actual = collect($rectangles)->first(fn (array $rectangle): bool => abs($rectangle['y'] - $expected['y']) <= 0.5);
+        expect($actual)->not->toBeNull();
+        foreach ($expected as $coordinate => $value) {
+            expect(abs($actual[$coordinate] - $value))->toBeLessThanOrEqual(0.5);
+        }
+    }
 
     resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
     $envelope->refresh();

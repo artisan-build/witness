@@ -13,9 +13,5 @@ final readonly class CompletedPdf
         public int $sourcePageCount,
         public int $certificatePageCount,
         public string $certificateChainHead,
-        /** @var list<array{page: int, width: float, height: float, rotation: int}> */
-        public array $pages,
-        /** @var list<array{page: int, type: string, kind: string, x: float, y: float, width: float, height: float}> */
-        public array $placements,
     ) {}
 }

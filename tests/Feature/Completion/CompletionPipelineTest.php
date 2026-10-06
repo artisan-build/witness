@@ -36,6 +36,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Tests\Support\RenderedPdfInspector;
 
 /** @return array{Envelope, Signer, CompletedPdf} */
 function completeFixtureEnvelope(
@@ -158,17 +159,6 @@ function completeFixtureEnvelope(
     return [$envelope->refresh(), $signer->refresh(), $rendered];
 }
 
-function decodedPdfStreams(string $pdf): string
-{
-    preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $matches);
-
-    return collect($matches[1])->map(function (string $stream): string {
-        $decoded = @gzuncompress($stream);
-
-        return is_string($decoded) ? $decoded : $stream;
-    })->implode("\n");
-}
-
 it('completes the required PDF corpus with strict page geometry and idempotent delivery', function (string $fixture): void {
     [$envelope, , $rendered] = completeFixtureEnvelope($fixture);
     $document = $envelope->document;
@@ -192,32 +182,51 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
         ->and($pdf->getWarnings())->toBe([])
         ->and(str_contains($final, '/Subtype /Image'))->toBeTrue();
 
+    $inspector = new RenderedPdfInspector($final);
     foreach ($manifest['fixtures'][$fixture]['pages'] as $index => $expectedPage) {
-        $page = $rendered->pages[$index];
+        $page = $inspector->pages()[$index];
         expect(abs($page['width'] - $expectedPage['displayed'][0]))->toBeLessThanOrEqual(0.01)
             ->and(abs($page['height'] - $expectedPage['displayed'][1]))->toBeLessThanOrEqual(0.01)
-            ->and($page['rotation'])->toBe($expectedPage['rotation']);
-        $pagePlacements = collect($rendered->placements)->where('page', $index + 1)->values();
+            ->and($page['rotation'])->toBe(0);
+
+        $rectangles = $inspector->clippingRectangles($index + 1);
+        expect($rectangles)->toHaveCount(2);
         foreach ([[.10, .12, .25, .05], [.62, .72, .20, .08]] as $placementIndex => $fractions) {
-            $placement = $pagePlacements[$placementIndex];
-            foreach (['x', 'y', 'width', 'height'] as $coordinateIndex => $coordinate) {
-                $dimension = $coordinateIndex % 2 === 0 ? $page['width'] : $page['height'];
-                expect(abs($placement[$coordinate] - ($fractions[$coordinateIndex] * $dimension)))
-                    ->toBeLessThanOrEqual(0.5);
+            $expected = [
+                'x' => $fractions[0] * $page['width'],
+                'y' => $page['height'] - (($fractions[1] + $fractions[3]) * $page['height']),
+                'width' => $fractions[2] * $page['width'],
+                'height' => $fractions[3] * $page['height'],
+            ];
+            foreach ($expected as $coordinate => $value) {
+                expect(abs($rectangles[$placementIndex][$coordinate] - $value))->toBeLessThanOrEqual(0.5);
             }
         }
-    }
-    $decoded = decodedPdfStreams($final);
-    if ($fixture === 'scanned-image-letter.pdf') {
-        expect($final)->toContain('/Width 1200')->toContain('/Height 1553')
-            ->and($decoded)->toMatch('/\/IMP\d+ Do/');
-    } else {
-        expect($decoded)->toContain('1 0.5 0 rg')
-            ->toContain(match ($fixture) {
-                'classic-1.4-letter.pdf' => 'CLASSIC-1.4',
-                'object-stream-1.7-a4.pdf' => 'OBJECT-STREAM-1.7',
-                default => 'PAGE 1 MediaBox',
-            });
+
+        $sourceForm = $inspector->sourceForm($index + 1);
+        $expectedMatrix = match ($expectedPage['rotation']) {
+            90 => [0, -1, 1, 0, 0, $expectedPage['crop_box'][2] - $expectedPage['crop_box'][0]],
+            270 => [0, 1, -1, 0, $expectedPage['crop_box'][3] - $expectedPage['crop_box'][1], 0],
+            default => [1, 0, 0, 1, 0, 0],
+        };
+        expect($sourceForm['dictionary'])->toContain('/Matrix ['.implode(' ', $expectedMatrix));
+
+        if ($fixture === 'scanned-image-letter.pdf') {
+            expect($final)->toContain('/Width 1200')->toContain('/Height 1553')
+                ->and($sourceForm['content'])->toMatch('/\/[A-Za-z0-9]+ Do/');
+        } else {
+            expect($sourceForm['content'])
+                ->toContain('1 0 0 rg')
+                ->toContain('0 1 0 rg')
+                ->toContain('0 0 1 rg')
+                ->toContain('1 0 1 rg')
+                ->toContain('1 0.5 0 rg')
+                ->toContain(match ($fixture) {
+                    'classic-1.4-letter.pdf' => 'CLASSIC-1.4',
+                    'object-stream-1.7-a4.pdf' => 'OBJECT-STREAM-1.7',
+                    default => 'PAGE '.($index + 1).' MediaBox',
+                });
+        }
     }
 
     $deliveries = $envelope->mailDeliveries()
