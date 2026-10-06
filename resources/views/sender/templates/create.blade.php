@@ -6,7 +6,7 @@
             <label>Template name<input name="name" value="{{ old('name') }}" required></label>
             <label>Envelope title<input name="title" value="{{ old('title') }}" required></label>
             <label>Default message<textarea name="message" rows="4">{{ old('message') }}</textarea></label>
-            <label>PDF document<input type="file" name="document" accept="application/pdf,.pdf" required></label>
+            <label>PDF document<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
             <button class="witness-button" type="submit">Create template</button>
         </form>
     </section>

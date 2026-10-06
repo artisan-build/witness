@@ -21,14 +21,14 @@
                     <flux:input type="date" name="expires_at" label="Expires on" :value="old('expires_at', $envelope->expires_at?->format('Y-m-d'))" :disabled="!$envelope->status->isDraft()" />
                     <flux:input type="number" min="1" max="30" name="reminder_interval_days" label="Automatic reminder interval in days (leave blank for off)" :value="old('reminder_interval_days', $envelope->reminder_interval_days)" :disabled="!$envelope->status->isDraft()" />
                     @if ($envelope->status->isDraft())
-                        <flux:button type="submit" variant="primary">Save details</flux:button>
+                        <button class="witness-button" type="submit">Save details</button>
                     @endif
                 </form>
                 @if ($envelope->status->isDraft())
                     <form method="POST" action="{{ route('sender.envelopes.document', $envelope) }}" enctype="multipart/form-data" class="witness-inline-form">
                         @csrf
                         @method('PUT')
-                        <flux:input type="file" name="document" label="Replace PDF" accept="application/pdf,.pdf" required />
+                        <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
                         <flux:button type="submit">Replace</flux:button>
                     </form>
                 @endif
@@ -133,7 +133,7 @@
                                 </template>
                             </div>
                         </div>
-                        <flux:button type="submit" variant="primary" data-testid="save-fields">Save placements</flux:button>
+                        <button class="witness-button" type="submit" data-testid="save-fields">Save placements</button>
                     </form>
                 @elseif ($envelope->signers->isEmpty())
                     <p>Add a signer before placing fields.</p>
@@ -155,7 +155,7 @@
             @if ($envelope->status->isDraft())
                 <form method="POST" action="{{ route('sender.envelopes.send', $envelope) }}">
                     @csrf
-                    <flux:button type="submit" variant="primary" class="witness-button-full" data-testid="send-envelope">Send and freeze</flux:button>
+                    <button class="witness-button witness-button-full" type="submit" data-testid="send-envelope">Send and freeze</button>
                 </form>
                 <form method="POST" action="{{ route('sender.envelopes.template', $envelope) }}" class="witness-stack">
                     @csrf
