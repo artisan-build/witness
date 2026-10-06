@@ -114,7 +114,7 @@ it('refuses unauthenticated invalid-authority and delegated sender admission wit
 it('refuses a delegated principal on a sender route without effects', function (): void {
     $fixture = senderAuthorizationFixture();
     $before = [Envelope::query()->count(), Template::query()->count(), Storage::allFiles()];
-    app('router')->prependMiddlewareToGroup('web', PublishesDelegatedAssertion::class);
+    resolve('router')->prependMiddlewareToGroup('web', PublishesDelegatedAssertion::class);
 
     $this->withSession(['witness.team_id' => $fixture['teamA']->getKey()])
         ->get(route('sender.dashboard'))->assertForbidden();

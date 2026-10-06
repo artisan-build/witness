@@ -100,6 +100,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             SubjectOffboardCommand::class,
             WarnExpiringCredentialsCommand::class,
             DeliverOwnershipWebhook::class,
+            'Closure@consumer/routes/console.php:12',
             'Closure@package/src/SystemAuthoritySchedule.php:27',
         ]),
         'no_signing_path' => [],

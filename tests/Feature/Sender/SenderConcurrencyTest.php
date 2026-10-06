@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Symfony\Component\Process\Process;
 use Tests\Support\PdfFixture;
 
@@ -102,7 +103,7 @@ it('serializes send, page reduction, and role edits against stale concurrent req
         $locker->prepare('DELETE FROM fields WHERE envelope_id = ?')->execute([$sendEnvelope]);
         $locker->prepare('DELETE FROM signers WHERE id = ?')->execute([$sendSigner]);
         $process = startSenderOperation('send', $teamId, $userId, $sendEnvelope);
-        usleep(250000);
+        Sleep::usleep(250000);
         expect($process->isRunning())->toBeTrue();
         $locker->commit();
         $result = finishSenderOperation($process);
@@ -118,7 +119,7 @@ it('serializes send, page reduction, and role edits against stale concurrent req
             'message' => null,
             'expires_at' => null,
         ]);
-        usleep(250000);
+        Sleep::usleep(250000);
         expect($process->isRunning())->toBeTrue();
         $locker->commit();
         $result = finishSenderOperation($process);
@@ -140,7 +141,7 @@ it('serializes send, page reduction, and role edits against stale concurrent req
         $locker->prepare('UPDATE documents SET page_count = 1 WHERE envelope_id = ?')->execute([$pageEnvelope]);
         $locker->prepare('DELETE FROM fields WHERE envelope_id = ?')->execute([$pageEnvelope]);
         $process = startSenderOperation('envelope-fields', $teamId, $userId, $pageEnvelope, $envelopeField);
-        usleep(250000);
+        Sleep::usleep(250000);
         expect($process->isRunning())->toBeTrue();
         $locker->commit();
         $result = finishSenderOperation($process);
@@ -161,7 +162,7 @@ it('serializes send, page reduction, and role edits against stale concurrent req
         $locker->prepare('SELECT id FROM templates WHERE id = ? FOR UPDATE')->execute([$pageTemplate]);
         $locker->prepare('UPDATE templates SET page_count = 1 WHERE id = ?')->execute([$pageTemplate]);
         $process = startSenderOperation('template-fields', $teamId, $userId, $pageTemplate, $templateField($pageRole));
-        usleep(250000);
+        Sleep::usleep(250000);
         expect($process->isRunning())->toBeTrue();
         $locker->commit();
         $result = finishSenderOperation($process);
@@ -172,7 +173,7 @@ it('serializes send, page reduction, and role edits against stale concurrent req
         $locker->prepare('SELECT id FROM templates WHERE id = ? FOR UPDATE')->execute([$roleTemplate]);
         $locker->prepare('DELETE FROM template_roles WHERE id = ?')->execute([$roleId]);
         $process = startSenderOperation('template-fields', $teamId, $userId, $roleTemplate, $templateField($roleId));
-        usleep(250000);
+        Sleep::usleep(250000);
         expect($process->isRunning())->toBeTrue();
         $locker->commit();
         $result = finishSenderOperation($process);
@@ -240,7 +241,7 @@ it('keeps only the committed object after overlapping envelope and template repl
             $locker->prepare("SELECT id FROM {$lockTable} WHERE id = ? FOR UPDATE")->execute([$recordId]);
             $first = startSenderOperation($operation, $teamId, $userId, $recordId, ['path' => $files[0], 'name' => 'first.pdf']);
             $second = startSenderOperation($operation, $teamId, $userId, $recordId, ['path' => $files[1], 'name' => 'second.pdf']);
-            usleep(350000);
+            Sleep::usleep(350000);
             expect($first->isRunning())->toBeTrue($first->getOutput().$first->getErrorOutput())
                 ->and($second->isRunning())->toBeTrue($second->getOutput().$second->getErrorOutput());
             $locker->commit();

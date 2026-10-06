@@ -15,9 +15,9 @@ use ArtisanBuild\BuiltForCloud\User;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 
-final class SendEnvelope
+final readonly class SendEnvelope
 {
-    public function __construct(private readonly EnvelopeSendValidator $validator) {}
+    public function __construct(private EnvelopeSendValidator $validator) {}
 
     public function handle(
         Team $team,

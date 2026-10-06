@@ -6,6 +6,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * @mixin IdeHelperPendingFileDeletion
+ */
 class PendingFileDeletion extends Model
 {
     protected $fillable = ['disk', 'path', 'attempts', 'last_attempted_at'];
