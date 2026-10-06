@@ -7,6 +7,7 @@ use App\Http\Controllers\EnvelopeController;
 use App\Http\Controllers\SigningController;
 use App\Http\Controllers\TeamSelectionController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Controllers\VerificationController;
 use App\Http\Middleware\AddSigningSecurityHeaders;
 use App\Http\Middleware\EnsureSelectedTeam;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
@@ -23,6 +24,14 @@ Route::middleware([AddSigningSecurityHeaders::class, 'throttle:signing-public'])
     Route::post('/sign/complete', [SigningController::class, 'sign'])->name('sign.complete');
     Route::post('/sign/decline', [SigningController::class, 'decline'])->name('sign.decline');
     Route::get('/sign/{token}', [SigningController::class, 'open'])->name('sign.open');
+});
+
+Route::middleware([AddSigningSecurityHeaders::class, 'throttle:verification-public'])->group(function (): void {
+    Route::get('/verify', [VerificationController::class, 'index'])->name('verify.index');
+    Route::post('/verify', [VerificationController::class, 'store'])->name('verify.store');
+    Route::get('/final/{delivery}', [DocumentController::class, 'recipient'])
+        ->middleware('signed')
+        ->name('final.recipient.download');
 });
 
 Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])->group(function (): void {
@@ -42,6 +51,7 @@ Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])-
         Route::post('/envelopes/{envelope}/signers/{signer}/resend-link', [EnvelopeController::class, 'resendLink'])->name('sender.envelopes.signers.resend-link');
         Route::post('/envelopes/{envelope}/template', [EnvelopeController::class, 'saveAsTemplate'])->name('sender.envelopes.template');
         Route::get('/envelopes/{envelope}/document', [DocumentController::class, 'envelope'])->name('sender.envelopes.document.show');
+        Route::get('/envelopes/{envelope}/final-document', [DocumentController::class, 'final'])->name('sender.envelopes.final-document');
 
         Route::get('/templates', [TemplateController::class, 'index'])->name('sender.templates.index');
         Route::get('/templates/new', [TemplateController::class, 'create'])->name('sender.templates.create');

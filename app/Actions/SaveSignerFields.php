@@ -8,6 +8,7 @@ use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
+use App\Enums\SignerStatus;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Exceptions\SigningAccessDenied;
 use App\Models\Envelope;
@@ -50,7 +51,9 @@ final class SaveSignerFields
 
                 if ($envelope->status !== EnvelopeStatus::Sent
                     || $signer->consented_at === null
-                    || $signer->otp_verified_at === null) {
+                    || $signer->otp_verified_at === null
+                    || $signer->status === SignerStatus::Signed
+                    || $signer->status === SignerStatus::Declined) {
                     throw new SigningAccessDenied;
                 }
 

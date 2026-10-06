@@ -12,12 +12,13 @@ use App\Enums\SignerStatus;
 use App\Events\EnvelopeReadyForCompletion;
 use App\Mail\SigningCode;
 use App\Mail\SigningInvitation;
+use App\Services\EnvelopeCompletionService;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
-it('completes every signer field type and exposes the PR4 completion seam', function (): void {
+it('completes and stamps every signer field type through the PR4 seam', function (): void {
     [$envelope, $signer, $token] = createSigningEnvelope();
     expect($token)->toBeString()->not->toBe('')
         ->and($signer->link_token_hash)->toBe(hash('sha256', $token))
@@ -83,6 +84,13 @@ it('completes every signer field type and exposes the PR4 completion seam', func
         ->and($signerEvents->pluck('ip_address')->unique()->all())->toBe(['127.0.0.1'])
         ->and($signerEvents->pluck('user_agent')->unique()->all())->toBe(['Witness signer test']);
     Event::assertDispatched(EnvelopeReadyForCompletion::class, fn ($event) => $event->envelopeId === $envelope->getKey());
+
+    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+    $envelope->refresh();
+    $final = Storage::get($envelope->document->fresh()->final_storage_path);
+    expect($envelope->status)->toBe(EnvelopeStatus::Completed)
+        ->and(hash('sha256', $final))->toBe($envelope->document->fresh()->final_sha256)
+        ->and($envelope->document->fresh()->original_sha256)->not->toBe($envelope->document->fresh()->final_sha256);
 
     $terminal = $this->get(route('sign.open', $token))->assertOk()->getContent();
     $invalid = $this->get(route('sign.open', str_repeat('x', 64)))->assertOk()->getContent();

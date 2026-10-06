@@ -12,6 +12,7 @@ use App\Events\EnvelopeLifecycleRecorded;
 use App\Models\Envelope;
 use App\Models\MailDelivery;
 use App\Models\Signer;
+use ArtisanBuild\BuiltForCloud\User;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -29,11 +30,42 @@ final class OutboundMailDelivery
 
         $delivery = new MailDelivery([
             'purpose' => $purpose,
+            'recipient_kind' => 'signer',
+            'recipient_name' => $signer->name,
+            'recipient_email' => $signer->email,
             'generation' => $generation,
             'status' => MailDeliveryStatus::Pending,
         ]);
         $delivery->envelope_id = $envelope->getKey();
         $delivery->signer_id = $signer->getKey();
+        $delivery->save();
+
+        return $delivery;
+    }
+
+    public function firstOrCreateFinal(Envelope $envelope, Signer|User $recipient): MailDelivery
+    {
+        $isSigner = $recipient instanceof Signer;
+
+        $attributes = [
+            'envelope_id' => $envelope->getKey(),
+            'purpose' => MailDeliveryPurpose::FinalDocument->value,
+            'recipient_kind' => $isSigner ? 'signer' : 'sender',
+            'recipient_email' => $recipient->email,
+            'generation' => 1,
+        ];
+        $delivery = MailDelivery::query()->where($attributes)->first();
+
+        if ($delivery !== null) {
+            return $delivery;
+        }
+
+        $delivery = new MailDelivery(array_merge($attributes, [
+            'recipient_name' => $recipient->name,
+            'status' => MailDeliveryStatus::Pending,
+        ]));
+        $delivery->envelope_id = $envelope->getKey();
+        $delivery->signer_id = $isSigner ? $recipient->getKey() : null;
         $delivery->save();
 
         return $delivery;
@@ -55,7 +87,7 @@ final class OutboundMailDelivery
     ): bool {
         $claimed = DB::transaction(function () use ($delivery): bool {
             Envelope::query()->lockForUpdate()->findOrFail($delivery->envelope_id);
-            Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
+            $this->lockSigner($delivery);
             $locked = MailDelivery::query()->lockForUpdate()->findOrFail($delivery->getKey());
 
             if ($locked->status !== MailDeliveryStatus::Pending) {
@@ -87,7 +119,7 @@ final class OutboundMailDelivery
                 $payload,
             ): bool {
                 $envelope = Envelope::query()->lockForUpdate()->findOrFail($delivery->envelope_id);
-                Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
+                $this->lockSigner($delivery);
                 $locked = MailDelivery::query()->lockForUpdate()->findOrFail($delivery->getKey());
 
                 if ($locked->status !== MailDeliveryStatus::Sending) {
@@ -121,7 +153,7 @@ final class OutboundMailDelivery
         } catch (Throwable) {
             DB::transaction(function () use ($delivery): void {
                 Envelope::query()->lockForUpdate()->findOrFail($delivery->envelope_id);
-                Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
+                $this->lockSigner($delivery);
                 MailDelivery::query()
                     ->whereKey($delivery)
                     ->where('status', MailDeliveryStatus::Sending->value)
@@ -160,7 +192,7 @@ final class OutboundMailDelivery
                 }
 
                 Envelope::query()->lockForUpdate()->findOrFail($candidate->envelope_id);
-                Signer::query()->lockForUpdate()->findOrFail($candidate->signer_id);
+                $this->lockSigner($candidate);
                 $delivery = MailDelivery::query()->lockForUpdate()->findOrFail($deliveryId);
                 $this->markStaleClaimUnknown($delivery);
             });
@@ -172,6 +204,7 @@ final class OutboundMailDelivery
     {
         $cutoff = now()->subMinutes(self::STALE_CLAIM_MINUTES);
         $stalePending = $delivery->status === MailDeliveryStatus::Pending
+            && $delivery->purpose !== MailDeliveryPurpose::FinalDocument
             && $delivery->created_at->lte($cutoff);
         $staleSending = $delivery->status === MailDeliveryStatus::Sending
             && $delivery->attempted_at?->lte($cutoff);
@@ -184,5 +217,12 @@ final class OutboundMailDelivery
         }
 
         return $delivery;
+    }
+
+    private function lockSigner(MailDelivery $delivery): void
+    {
+        if ($delivery->signer_id !== null) {
+            Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
+        }
     }
 }

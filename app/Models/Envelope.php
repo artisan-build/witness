@@ -89,6 +89,12 @@ class Envelope extends Model
         return $this->hasMany(AuditEvent::class)->orderBy('sequence');
     }
 
+    /** @return HasMany<MailDelivery, $this> */
+    public function mailDeliveries(): HasMany
+    {
+        return $this->hasMany(MailDelivery::class);
+    }
+
     /** @param Builder<Envelope> $query */
     #[Scope]
     protected function forTeam(Builder $query, Team|int $team): void

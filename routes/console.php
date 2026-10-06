@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\EnvelopeCompletionService;
 use App\Services\OutboundMailDelivery;
 use App\Services\PdfDocumentService;
 use ArtisanBuild\BuiltForCloud\SystemAuthoritySchedule;
@@ -14,6 +15,7 @@ Artisan::command('inspire', function (): void {
 resolve(SystemAuthoritySchedule::class)->call(Schedule::getFacadeRoot(), function (): void {
     resolve(PdfDocumentService::class)->retryPending();
     resolve(OutboundMailDelivery::class)->reconcileStaleClaims();
+    resolve(EnvelopeCompletionService::class)->dispatchReady();
 })
     ->name('witness:cleanup-private-files')
     ->everyMinute()
