@@ -41,6 +41,25 @@ final class PdfFontCoverage
         }
     }
 
+    public function escapeUnsupported(string $font, string $text): string
+    {
+        $pdf = $this->font($font);
+        $renderable = '';
+
+        foreach (mb_str_split($text) as $character) {
+            $codepoint = mb_ord($character);
+            $isControlOrFormat = preg_match('/[\p{Cc}\p{Cf}]/u', $character) === 1;
+            $isMissing = ! $pdf->font->isCharDefined($codepoint)
+                || $pdf->font->getGidForOrd($codepoint) === 0;
+
+            $renderable .= $isControlOrFormat || $isMissing
+                ? sprintf('\\u{%04X}', $codepoint)
+                : $character;
+        }
+
+        return $renderable;
+    }
+
     private function font(string $font): Tcpdf
     {
         if (! in_array($font, [self::SCRIPT, self::TEXT], true)) {

@@ -77,8 +77,9 @@ final readonly class PdfCompletionRenderer
             ]);
 
             $cropBox = $template->getMediaBox();
+            $rotation = (($template->getRotation() % 360) + 360) % 360;
             // tc-lib's rotation matrices assume a zero-origin selected box. Its y placement uses top-left coordinates.
-            [$placementX, $placementY] = match ($template->getRotation()) {
+            [$placementX, $placementY] = match ($rotation) {
                 0 => [-$cropBox[0], $cropBox[1]],
                 90 => [-$cropBox[1], -$cropBox[0]],
                 180 => [$cropBox[0], -$cropBox[1]],
@@ -225,6 +226,7 @@ final readonly class PdfCompletionRenderer
             'Final-content definition: Witness final content v1 hashes the original SHA-256, displayed field responses, and the pre-completion audit chain head. It excludes this rendered PDF container and certificate pages.',
             'Certificate audit chain head: '.$chainHead,
             'Verify URL: '.route('verify.index'),
+            'Characters outside the certificate font are shown as \u{…} escapes.',
             '',
             'Signers',
         ];
@@ -252,7 +254,10 @@ final readonly class PdfCompletionRenderer
 
         $wrapped = [];
         foreach ($lines as $line) {
-            array_push($wrapped, ...$this->wrap($line, 96));
+            array_push($wrapped, ...$this->wrap(
+                $this->fontCoverage->escapeUnsupported(PdfFontCoverage::TEXT, $line),
+                96,
+            ));
         }
         $this->fontCoverage->assertSupported(PdfFontCoverage::TEXT, implode("\n", $wrapped));
 

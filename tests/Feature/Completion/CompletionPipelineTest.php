@@ -26,6 +26,7 @@ use App\Services\CompletedPdf;
 use App\Services\EnvelopeCompletionService;
 use App\Services\OutboundMailDelivery;
 use App\Services\PdfCompletionRenderer;
+use App\Services\PdfFontCoverage;
 use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
 use ArtisanBuild\BuiltForCloud\User;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
@@ -49,6 +50,7 @@ function completeFixtureEnvelope(
     ?User $sender = null,
     bool $resetStorage = true,
     bool $deliver = true,
+    string $userAgent = 'Completion test',
 ): array {
     if ($resetStorage) {
         Storage::fake('local');
@@ -106,7 +108,7 @@ function completeFixtureEnvelope(
         ]);
     }
 
-    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey(), '192.0.2.10', 'Completion test');
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey(), '192.0.2.10', $userAgent);
     DB::transaction(function () use ($signer): void {
         DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
         Signer::query()->whereKey($signer)->update([
@@ -124,7 +126,7 @@ function completeFixtureEnvelope(
         AuditActorType::Signer,
         $signer->getKey(),
         '192.0.2.11',
-        'Completion test',
+        $userAgent,
     );
     EnvelopeLifecycleRecorded::record(
         $envelope,
@@ -132,7 +134,7 @@ function completeFixtureEnvelope(
         AuditActorType::Signer,
         $signer->getKey(),
         '192.0.2.11',
-        'Completion test',
+        $userAgent,
     );
 
     $responses = [];
@@ -141,9 +143,9 @@ function completeFixtureEnvelope(
             ? ['text' => 'Approved Α (literal) \\ / [safe]']
             : ['kind' => 'typed', 'typed' => 'Alex Signer'];
     }
-    resolve(SaveSignerFields::class)->handle($signer, $responses, '192.0.2.11', 'Completion test');
+    resolve(SaveSignerFields::class)->handle($signer, $responses, '192.0.2.11', $userAgent);
     Event::fake([EnvelopeReadyForCompletion::class]);
-    resolve(SignEnvelope::class)->handle($signer->refresh(), '192.0.2.11', 'Completion test');
+    resolve(SignEnvelope::class)->handle($signer->refresh(), '192.0.2.11', $userAgent);
     $rendered = resolve(PdfCompletionRenderer::class)->render($envelope->refresh());
     if ($deliver) {
         resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
@@ -249,7 +251,8 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
         }
 
         $sourceForm = $inspector->sourceForm($index + 1);
-        $expectedMatrix = match ($expectedPage['rotation']) {
+        $normalizedRotation = (($expectedPage['rotation'] % 360) + 360) % 360;
+        $expectedMatrix = match ($normalizedRotation) {
             90 => [0, -1, 1, 0, 0, $expectedPage['crop_box'][2] - $expectedPage['crop_box'][0]],
             180 => [-1, 0, 0, -1, $expectedPage['crop_box'][2] - $expectedPage['crop_box'][0], $expectedPage['crop_box'][3] - $expectedPage['crop_box'][1]],
             270 => [0, 1, -1, 0, $expectedPage['crop_box'][3] - $expectedPage['crop_box'][1], 0],
@@ -329,6 +332,7 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
     'object stream PDF 1.7' => 'object-stream-1.7-a4.pdf',
     'rotated mixed sizes' => 'rotated-mixed-sizes.pdf',
     'nonzero CropBox at every rotation' => 'nonzero-cropbox-rotations.pdf',
+    'non-normalized rotations' => 'non-normalized-rotations.pdf',
     'image-only scan' => 'scanned-image-letter.pdf',
 ]);
 
@@ -374,33 +378,63 @@ it('rejects signer field characters outside the selected PDF font before signing
     'emoji typed signature' => [FieldType::Signature, ['kind' => 'typed', 'typed' => 'Alex 🙂']],
 ]);
 
-it('fails completion before final state when existing certificate evidence has missing glyphs', function (string $name): void {
-    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature], signerName: $name);
-    $field = $signer->fields()->sole();
-    resolve(UpdateFieldResponse::class)->handle(
-        $envelope,
-        $signer,
-        $field,
-        ['kind' => 'typed', 'text' => 'Alex Signer'],
-        now(),
+it('escapes every unrenderable or control certificate character into supported visible text', function (): void {
+    $coverage = resolve(PdfFontCoverage::class);
+    $renderable = $coverage->escapeUnsupported(
+        PdfFontCoverage::TEXT,
+        "Visible 李🙂\u{200F}\u{0001}",
     );
-    DB::transaction(function () use ($signer): void {
-        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
-        Signer::query()->whereKey($signer)->update([
-            'status' => SignerStatus::Signed,
-            'signed_at' => now(),
-            'updated_at' => now(),
-        ]);
-    });
 
-    expect(fn () => resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))
-        ->toThrow(RuntimeException::class, 'unsupported by its PDF font')
-        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
-        ->and($envelope->document->fresh()->final_storage_path)->toBeNull()
-        ->and($envelope->auditEvents()->where('type', AuditEventType::Completed)->count())->toBe(0)
-        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(0);
-    Mail::assertSent(CompletedDocument::class, 0);
-})->with(['CJK' => '李明', 'emoji' => 'Alex 🙂']);
+    expect($renderable)->toBe('Visible \\u{674E}\\u{1F642}\\u{200F}\\u{0001}')
+        ->and($coverage->supports(PdfFontCoverage::TEXT, $renderable))->toBeTrue();
+});
+
+it('completes with lossless visible certificate escapes while preserving original audit evidence', function (string $senderName, string $userAgent, array $expectedEscapes): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create([
+        'name' => $senderName,
+        'email' => 'morgan@example.test',
+    ]);
+    $team->users()->attach($sender);
+
+    [$envelope, , $rendered] = completeFixtureEnvelope(
+        'classic-1.4-letter.pdf',
+        team: $team,
+        sender: $sender,
+        userAgent: $userAgent,
+    );
+    $inspector = new RenderedPdfInspector(Storage::get($envelope->document->final_storage_path));
+    $certificateText = '';
+    for ($page = $rendered->sourcePageCount + 1; $page <= $rendered->sourcePageCount + $rendered->certificatePageCount; $page++) {
+        $certificateText .= collect($inspector->textRuns($page))->pluck('text')->implode('');
+    }
+
+    expect($envelope->status)->toBe(EnvelopeStatus::Completed)
+        ->and($envelope->sender->name)->toBe($senderName)
+        ->and($envelope->auditEvents()->where('user_agent', $userAgent)->exists())->toBeTrue()
+        ->and(resolve(AuditChainVerifier::class)->verify($envelope)->valid)->toBeTrue()
+        ->and($certificateText)->toContain('Characters outside the certificate font are shown as \\u{…} escapes.');
+    foreach ($expectedEscapes as $escape) {
+        expect($certificateText)->toContain($escape);
+    }
+    Mail::assertSent(CompletedDocument::class, 2);
+})->with([
+    'non-Latin sender display name' => [
+        '田中 太郎',
+        'Completion test',
+        ['\\u{7530}\\u{4E2D}', '\\u{592A}\\u{90CE}'],
+    ],
+    'emoji user agent' => [
+        'Morgan Sender',
+        'Mozilla/5.0 (signed 🙂)',
+        ['Mozilla/5.0 (signed \\u{1F642})'],
+    ],
+    'mixed CJK emoji RTL and format-control sender name' => [
+        "田中 🙂 مرحبا\u{2067}",
+        'Completion test',
+        ['\\u{7530}\\u{4E2D}', '\\u{1F642}', '\\u{2067}'],
+    ],
+]);
 
 it('rejects the encrypted completion fixture before any final artifact is written', function (): void {
     $bytes = file_get_contents(base_path('tests/Fixtures/Pdf/encrypted-password.pdf'));

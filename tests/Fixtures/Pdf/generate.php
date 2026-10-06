@@ -295,6 +295,43 @@ $fixtures = [
             [0, 90, 180, 270],
         ),
     ],
+    'non-normalized-rotations.pdf' => [
+        'bytes' => classicFixture(array_map(
+            static fn (int $rotation): array => [
+                'media' => [0, 0, 300, 500],
+                'crop' => [20, 30, 280, 470],
+                'rotate' => $rotation,
+                'label' => "NON-NORMALIZED Rotate {$rotation}",
+                'crop_fiducials' => true,
+            ],
+            [450, -90, -270],
+        )),
+        'pages' => array_map(
+            static fn (int $rotation): array => [
+                'media_box' => [0, 0, 300, 500],
+                'crop_box' => [20, 30, 280, 470],
+                'rotation' => $rotation,
+                'displayed' => [440, 260],
+                'label' => "NON-NORMALIZED Rotate {$rotation}",
+                'label_origin' => (($rotation % 360) + 360) % 360 === 90 ? [412, 244] : [28, 16],
+            ],
+            [450, -90, -270],
+        ),
+    ],
+    'invalid-rotation.pdf' => [
+        'bytes' => classicFixture([[
+            'media' => [0, 0, 300, 500],
+            'crop' => [20, 30, 280, 470],
+            'rotate' => 45,
+            'label' => 'INVALID Rotate 45',
+        ]]),
+        'pages' => [[
+            'media_box' => [0, 0, 300, 500],
+            'crop_box' => [20, 30, 280, 470],
+            'rotation' => 45,
+            'displayed' => [440, 260],
+        ]],
+    ],
     'scanned-image-letter.pdf' => [
         'bytes' => scannedFixture(),
         'pages' => [['media_box' => [0, 0, 612, 792], 'crop_box' => [0, 0, 612, 792], 'rotation' => 0, 'displayed' => [612, 792]]],

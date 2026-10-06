@@ -39,6 +39,16 @@ final class PdfDocumentService
             $pdf = new Tcpdf;
             $source = $pdf->setImportSourceData($bytes, ['strict_limits' => true]);
             $pages = $pdf->getSourcePageCount($source);
+            for ($page = 1; $page <= $pages; $page++) {
+                $rotation = $pdf->importPage($source, $page)->getRotation();
+                if ($rotation % 90 !== 0) {
+                    throw ValidationException::withMessages([
+                        'document' => 'Every PDF page rotation must be a multiple of 90 degrees.',
+                    ]);
+                }
+            }
+        } catch (ValidationException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             $message = str_contains(strtolower($exception->getMessage()), 'encrypt')
                 ? 'Encrypted or password-protected PDFs are not supported.'

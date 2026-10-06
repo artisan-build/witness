@@ -47,7 +47,29 @@ it('rejects spoofed encrypted empty too-large and over-page-limit uploads withou
     'zero pages' => [fn () => UploadedFile::fake()->createWithContent('empty.pdf', PdfFixture::make(0)), 'The PDF must contain between 1 and 100 pages.'],
     'over 100 pages' => [fn () => UploadedFile::fake()->createWithContent('long.pdf', PdfFixture::make(101)), 'The PDF must contain between 1 and 100 pages.'],
     'over 20 MiB' => [fn () => UploadedFile::fake()->create('large.pdf', 20481, 'application/pdf'), 'The document field must not be greater than 20480 kilobytes.'],
+    'invalid page rotation' => [
+        fn () => UploadedFile::fake()->createWithContent(
+            'invalid-rotation.pdf',
+            file_get_contents(base_path('tests/Fixtures/Pdf/invalid-rotation.pdf')),
+        ),
+        'Every PDF page rotation must be a multiple of 90 degrees.',
+    ],
 ]);
+
+it('accepts every spec-valid non-normalized page rotation at upload', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $pdf = file_get_contents(base_path('tests/Fixtures/Pdf/non-normalized-rotations.pdf'));
+
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Normalized rotations',
+        'document' => UploadedFile::fake()->createWithContent('normalized.pdf', $pdf),
+    ])->assertRedirect();
+
+    $envelope = Envelope::query()->with('document')->sole();
+    expect($envelope->document->page_count)->toBe(3)
+        ->and($envelope->document->original_sha256)->toBe(hash('sha256', $pdf));
+});
 
 it('replaces a draft PDF atomically and removes the previous private object and placements', function (): void {
     Storage::fake('local');
