@@ -12,16 +12,25 @@ use App\Events\EnvelopeLifecycleRecorded;
 use App\Mail\LifecycleNotification;
 use App\Models\Envelope;
 use App\Models\Signer;
+use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
+use DomainException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 final readonly class EnvelopeLifecycleService
 {
-    public function __construct(private RotateSigningInvitation $rotateInvitation) {}
+    public function __construct(
+        private RotateSigningInvitation $rotateInvitation,
+        private SystemAuthorityContext $systemAuthority,
+    ) {}
 
     public function runDue(): void
     {
+        if (! $this->systemAuthority->active()) {
+            throw new DomainException('Scheduled lifecycle work requires active system authority.');
+        }
+
         $this->expireDue();
         $this->remindDue();
     }

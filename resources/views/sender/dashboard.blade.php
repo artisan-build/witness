@@ -10,13 +10,13 @@
 
     <form method="GET" action="{{ route('sender.dashboard') }}" class="witness-inline-form" data-testid="status-filter">
         <label for="status">Status</label>
-        <select id="status" name="status">
+        <select class="witness-select" id="status" name="status">
             <option value="">All</option>
             @foreach (\App\Enums\EnvelopeStatus::cases() as $option)
                 <option value="{{ $option->value }}" @selected($status === $option->value)>{{ str($option->value)->replace('_', ' ')->title() }}</option>
             @endforeach
         </select>
-        <flux:button type="submit">Filter</flux:button>
+        <button class="witness-button" type="submit">Filter</button>
     </form>
 
     <section class="witness-list" data-testid="envelope-list">

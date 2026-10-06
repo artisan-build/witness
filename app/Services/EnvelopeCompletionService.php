@@ -132,6 +132,43 @@ final readonly class EnvelopeCompletionService
         $this->deliverPending($envelopeId, $replacement->getKey());
     }
 
+    public function reissueSent(Team $team, User $sender, int $envelopeId, int $deliveryId): bool
+    {
+        $replacement = DB::transaction(function () use ($team, $sender, $envelopeId, $deliveryId): MailDelivery {
+            $envelope = Envelope::query()
+                ->forTeam($team)
+                ->where('sender_id', $sender->getKey())
+                ->lockForUpdate()
+                ->findOrFail($envelopeId);
+            $candidate = MailDelivery::query()
+                ->where('envelope_id', $envelopeId)
+                ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+                ->findOrFail($deliveryId);
+            if ($candidate->signer_id !== null) {
+                Signer::query()->lockForUpdate()->findOrFail($candidate->signer_id);
+            }
+            $latest = MailDelivery::query()
+                ->where('envelope_id', $envelopeId)
+                ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+                ->where('recipient_kind', $candidate->recipient_kind)
+                ->where('recipient_email', $candidate->recipient_email)
+                ->orderByDesc('generation')
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($envelope->status !== EnvelopeStatus::Completed
+                || $latest->getKey() !== $candidate->getKey()
+                || $latest->status !== MailDeliveryStatus::Sent) {
+                throw new \DomainException('Only the latest successful final-document delivery can receive a fresh link.');
+            }
+
+            return $this->mailDelivery->createFinalGeneration($latest);
+        });
+
+        $this->deliverPending($envelopeId, $replacement->getKey());
+
+        return $replacement->fresh()->status === MailDeliveryStatus::Sent;
+    }
+
     private function deliverPending(int $envelopeId, ?int $onlyDeliveryId = null): void
     {
         $envelope = Envelope::query()->with(['document', 'sender'])->findOrFail($envelopeId);

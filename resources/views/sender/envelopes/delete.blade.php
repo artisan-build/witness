@@ -6,7 +6,7 @@
         <form method="POST" action="{{ route('sender.envelopes.destroy', $envelope) }}" class="witness-stack">
             @csrf @method('DELETE')
             <flux:input name="confirmation" label="Type DELETE to confirm" required />
-            <flux:button type="submit" variant="danger">Permanently delete</flux:button>
+            <button class="witness-button" type="submit">Permanently delete</button>
         </form>
     </section>
 </x-sender-layout>

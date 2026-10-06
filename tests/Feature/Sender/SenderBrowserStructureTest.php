@@ -77,6 +77,10 @@ it('renders the real PDF placement structure with stable browser hooks and commi
 
     $senderScript = (string) file_get_contents(public_path('build/assets/sender.js'));
     $senderStyles = (string) file_get_contents(public_path('build/assets/sender.css'));
+    $dashboardView = (string) file_get_contents(resource_path('views/sender/dashboard.blade.php'));
+    $setupView = (string) file_get_contents(resource_path('views/sender/setup.blade.php'));
+    $deleteView = (string) file_get_contents(resource_path('views/sender/envelopes/delete.blade.php'));
+    $envelopeView = (string) file_get_contents(resource_path('views/livewire/sender/envelope-editor.blade.php'));
     $canvasWidth = strpos($senderScript, 'this.$refs.canvas.width = viewport.width;');
     $canvasHeight = strpos($senderScript, 'this.$refs.canvas.height = viewport.height;');
     $render = strpos($senderScript, 'const renderTask = page.render({ canvasContext: context, viewport });');
@@ -94,6 +98,22 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->and($senderScript)->toContain('const renderTask = page.render({ canvasContext: context, viewport });')
         ->and($senderStyles)->toContain('input.witness-file-input::file-selector-button')
         ->and($senderStyles)->toContain('background:var(--w-rust)')
+        ->and($senderStyles)->toContain('.witness-select')
+        ->and($senderStyles)->toContain('.witness-status-completion_failed')
+        ->and($senderStyles)->toContain('.witness-status-completed')
+        ->and($senderStyles)->toContain('.witness-status-declined')
+        ->and($senderStyles)->toContain('.witness-status-voided')
+        ->and($senderStyles)->toContain('.witness-status-expired')
+        ->and($dashboardView)->toContain('<select class="witness-select"', '<button class="witness-button" type="submit">Filter</button>')
+        ->and($setupView)->toContain('<button class="witness-button" type="submit">Send me a test email</button>')
+        ->and($deleteView)->toContain('<button class="witness-button" type="submit">Permanently delete</button>')
+        ->and($envelopeView)->toContain(
+            '<button class="witness-button witness-button-small" type="submit">Resend link</button>',
+            '<button class="witness-button" type="submit">Void envelope</button>',
+            '<button class="witness-button" type="submit">Retry completion</button>',
+            '<button class="witness-button" type="submit">Create a new delivery generation</button>',
+            '<button class="witness-button" type="submit">Issue fresh final-document link</button>',
+        )
         ->and($canvasWidth)->toBeInt()
         ->and($canvasHeight)->toBeInt()
         ->and($render)->toBeInt();

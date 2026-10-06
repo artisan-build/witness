@@ -320,6 +320,20 @@ final readonly class EnvelopeController
         return back()->with('status', 'A new final-document delivery generation was attempted.');
     }
 
+    public function reissueFinalLink(Request $request, int $envelope, int $delivery): RedirectResponse
+    {
+        $delivered = $this->completion->reissueSent(
+            $this->selectedTeam->get(),
+            $this->user($request),
+            $envelope,
+            $delivery,
+        );
+
+        return back()->with('status', $delivered
+            ? 'A fresh final-document link was handed to the configured mailer.'
+            : 'The mail handoff is unknown. The fresh link was not claimed as delivered.');
+    }
+
     public function confirmDelete(Request $request, int $envelope): View
     {
         $record = $this->findEnvelope($this->user($request), $envelope);

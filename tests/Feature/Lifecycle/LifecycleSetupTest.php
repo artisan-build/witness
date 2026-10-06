@@ -120,6 +120,58 @@ it('preserves explicit expiry and enforces reminder cadence, off state, authorit
     expect($active->mailDeliveries()->max('generation'))->toBe($generation);
 });
 
+it('requires active system authority before scheduled lifecycle work has any effect', function (): void {
+    [$envelope] = createSigningEnvelope([FieldType::Signature]);
+    $this->travel(31)->days();
+    Mail::fake();
+    $auditCount = AuditEvent::query()->count();
+    $verbCount = DB::table('verb_events')->count();
+    $deliveryCount = DB::table('mail_deliveries')->count();
+
+    expect(fn () => resolve(EnvelopeLifecycleService::class)->runDue())
+        ->toThrow(DomainException::class, 'active system authority');
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and(AuditEvent::query()->count())->toBe($auditCount)
+        ->and(DB::table('verb_events')->count())->toBe($verbCount)
+        ->and(DB::table('mail_deliveries')->count())->toBe($deliveryCount);
+    Mail::assertNothingSent();
+});
+
+it('does not automatically replace an unresolved invitation handoff', function (MailDeliveryStatus $status): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    $delivery = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningInvitation)->sole();
+    $delivery->update([
+        'status' => $status,
+        'attempted_at' => $status === MailDeliveryStatus::Sending ? now() : null,
+        'unknown_at' => $status === MailDeliveryStatus::Unknown ? now() : null,
+    ]);
+    $hash = $signer->link_token_hash;
+    $generation = $delivery->generation;
+    $this->travel(4)->days();
+    Mail::fake();
+
+    resolve(SystemAuthorityContext::class)->run(fn () => resolve(EnvelopeLifecycleService::class)->runDue());
+
+    expect($signer->fresh()->link_token_hash)->toBe($hash)
+        ->and($signer->mailDeliveries()->max('generation'))->toBe($generation)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Reminded)->count())->toBe(0);
+    Mail::assertNothingSent();
+
+    expect(resolve(RotateSigningInvitation::class)->handle(
+        $envelope->team,
+        $envelope->sender,
+        (int) $envelope->getKey(),
+        (int) $signer->getKey(),
+    ))->toBeTrue()
+        ->and($signer->fresh()->link_token_hash)->not->toBe($hash)
+        ->and($signer->mailDeliveries()->max('generation'))->toBe($generation + 1);
+})->with([
+    MailDeliveryStatus::Pending,
+    MailDeliveryStatus::Sending,
+    MailDeliveryStatus::Unknown,
+]);
+
 it('expires before scheduled reminders and leaves every signing link neutral', function (): void {
     [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
     $this->travel(31)->days();
@@ -249,6 +301,58 @@ it('never automatically retries an unknown final handoff and creates an explicit
     expect($unknown->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
         ->and($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->orderBy('generation')->pluck('status')->all())
         ->toBe([MailDeliveryStatus::Unknown, MailDeliveryStatus::Sent]);
+});
+
+it('lets only the selected-team owning sender reissue the latest successful final-document link', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.field_response_write = 'on'");
+        DB::table('fields')->where('signer_id', $signer->getKey())->update([
+            'value' => json_encode(['kind' => 'typed', 'text' => 'Alex Signer'], JSON_THROW_ON_ERROR),
+            'completed_at' => now(),
+        ]);
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        DB::table('signers')->where('id', $signer->getKey())->update(['status' => SignerStatus::Signed->value, 'signed_at' => now()]);
+    });
+    resolve(EnvelopeCompletionService::class)->complete((int) $envelope->getKey());
+    $delivery = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->sole();
+    $finalPath = $envelope->document->fresh()->final_storage_path;
+    $peer = UserFactory::new()->create();
+    $envelope->team->users()->attach($peer);
+    $otherTeam = Team::factory()->create();
+    $otherTeam->users()->attach($envelope->sender);
+
+    expect(fn () => resolve(EnvelopeCompletionService::class)->reissueSent(
+        $envelope->team,
+        $peer,
+        (int) $envelope->getKey(),
+        (int) $delivery->getKey(),
+    ))->toThrow(ModelNotFoundException::class)
+        ->and(fn () => resolve(EnvelopeCompletionService::class)->reissueSent(
+            $otherTeam,
+            $envelope->sender,
+            (int) $envelope->getKey(),
+            (int) $delivery->getKey(),
+        ))->toThrow(ModelNotFoundException::class)
+        ->and($signer->mailDeliveries()->count())->toBe(2);
+
+    $this->actingAsVersioned($envelope->sender)->withSession(['witness.team_id' => $envelope->team_id])
+        ->post(route('sender.envelopes.deliveries.reissue-link', [$envelope, $delivery]))
+        ->assertRedirect()
+        ->assertSessionHas('status');
+
+    $deliveries = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->orderBy('generation')->get();
+    expect($deliveries->pluck('status')->all())->toBe([MailDeliveryStatus::Sent, MailDeliveryStatus::Sent])
+        ->and($deliveries->pluck('generation')->all())->toBe([1, 2])
+        ->and($envelope->document->fresh()->final_storage_path)->toBe($finalPath)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->where('payload->delivery_id', $deliveries->last()->getKey())->count())->toBe(1)
+        ->and(fn () => resolve(EnvelopeCompletionService::class)->reissueSent(
+            $envelope->team,
+            $envelope->sender,
+            (int) $envelope->getKey(),
+            (int) $delivery->getKey(),
+        ))->toThrow(DomainException::class)
+        ->and($signer->mailDeliveries()->count())->toBe(3);
 });
 
 it('purges a terminal aggregate and all private and Verbs material under the exact envelope setting', function (): void {

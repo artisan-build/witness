@@ -82,7 +82,7 @@
                                     && ! in_array($signer->status, [\App\Enums\SignerStatus::Signed, \App\Enums\SignerStatus::Declined], true))
                                     <form method="POST" action="{{ route('sender.envelopes.signers.resend-link', [$envelope, $signer]) }}">
                                         @csrf
-                                        <flux:button type="submit" size="sm">Resend link</flux:button>
+                                        <button class="witness-button witness-button-small" type="submit">Resend link</button>
                                     </form>
                                 @endif
                             </li>
@@ -177,12 +177,12 @@
                 <form method="POST" action="{{ route('sender.envelopes.void', $envelope) }}" class="witness-stack" data-testid="void-envelope">
                     @csrf
                     <flux:textarea name="reason" label="Reason for voiding" required />
-                    <flux:button type="submit" variant="danger">Void envelope</flux:button>
+                    <button class="witness-button" type="submit">Void envelope</button>
                 </form>
             @elseif ($envelope->status === \App\Enums\EnvelopeStatus::CompletionFailed)
                 <div data-testid="completion-failed"><strong>Completion failed.</strong> Your signatures and audit evidence are preserved.</div>
                 <form method="POST" action="{{ route('sender.envelopes.retry-completion', $envelope) }}">@csrf
-                    <flux:button type="submit" variant="primary">Retry completion</flux:button>
+                    <button class="witness-button" type="submit">Retry completion</button>
                 </form>
             @endif
 
@@ -191,7 +191,19 @@
                     @csrf
                     <p>Delivery to {{ $delivery->recipient_name }} is unknown. It may already have succeeded; resending can create a duplicate.</p>
                     <label><input type="checkbox" name="confirm_duplicate_risk" value="1" required> I understand the duplicate-delivery risk.</label>
-                    <flux:button type="submit">Create a new delivery generation</flux:button>
+                    <button class="witness-button" type="submit">Create a new delivery generation</button>
+                </form>
+            @endforeach
+
+            @foreach ($envelope->mailDeliveries
+                ->where('purpose', \App\Enums\MailDeliveryPurpose::FinalDocument)
+                ->groupBy(fn ($delivery) => $delivery->recipient_kind.'|'.$delivery->recipient_email)
+                ->map(fn ($deliveries) => $deliveries->sortByDesc('generation')->first())
+                ->where('status', \App\Enums\MailDeliveryStatus::Sent) as $delivery)
+                <form method="POST" action="{{ route('sender.envelopes.deliveries.reissue-link', [$envelope, $delivery]) }}" class="witness-stack" data-testid="final-link-reissue">
+                    @csrf
+                    <p>Issue {{ $delivery->recipient_name }} a fresh final-document link without creating another final PDF.</p>
+                    <button class="witness-button" type="submit">Issue fresh final-document link</button>
                 </form>
             @endforeach
 

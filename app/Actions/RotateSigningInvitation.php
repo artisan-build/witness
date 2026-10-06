@@ -67,7 +67,7 @@ final readonly class RotateSigningInvitation
                     ->orderByDesc('generation')
                     ->lockForUpdate()
                     ->first();
-                if ($latest?->status === MailDeliveryStatus::Unknown) {
+                if ($latest === null || $latest->status !== MailDeliveryStatus::Sent) {
                     return null;
                 }
             }

@@ -62,6 +62,7 @@ Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])-
         Route::post('/envelopes/{envelope}/void', [EnvelopeController::class, 'void'])->name('sender.envelopes.void');
         Route::post('/envelopes/{envelope}/retry-completion', [EnvelopeController::class, 'retryCompletion'])->name('sender.envelopes.retry-completion');
         Route::post('/envelopes/{envelope}/deliveries/{delivery}/resend', [EnvelopeController::class, 'resendUnknown'])->name('sender.envelopes.deliveries.resend');
+        Route::post('/envelopes/{envelope}/deliveries/{delivery}/reissue-link', [EnvelopeController::class, 'reissueFinalLink'])->name('sender.envelopes.deliveries.reissue-link');
         Route::get('/envelopes/{envelope}/delete', [EnvelopeController::class, 'confirmDelete'])->name('sender.envelopes.delete');
         Route::delete('/envelopes/{envelope}', [EnvelopeController::class, 'destroy'])->name('sender.envelopes.destroy');
         Route::post('/envelopes/{envelope}/template', [EnvelopeController::class, 'saveAsTemplate'])->name('sender.envelopes.template');

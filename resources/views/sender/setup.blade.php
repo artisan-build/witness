@@ -15,7 +15,7 @@
         <h2>Email</h2>
         <p>{{ $mailer === 'scalpels' ? 'Sent by Scalpels' : "Your own mail configuration ({$mailer})" }}</p>
         <form method="POST" action="{{ route('sender.setup.test-mail') }}">@csrf
-            <flux:button type="submit" variant="primary">Send me a test email</flux:button>
+            <button class="witness-button" type="submit">Send me a test email</button>
         </form>
     </section>
 </x-sender-layout>
