@@ -117,6 +117,109 @@
                 }
             ]
         },
+        "nonzero-cropbox-rotations.pdf": {
+            "sha256": "6a172e0ee96c015bdd217467f5eab740c9a8293e524a10efeeadfff66a13b469",
+            "bytes": 2875,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        260,
+                        440
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 0",
+                    "label_origin": [
+                        16,
+                        412
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 90,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 90",
+                    "label_origin": [
+                        412,
+                        244
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 180,
+                    "displayed": [
+                        260,
+                        440
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 180",
+                    "label_origin": [
+                        244,
+                        28
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 270,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 270",
+                    "label_origin": [
+                        28,
+                        16
+                    ]
+                }
+            ]
+        },
         "scanned-image-letter.pdf": {
             "sha256": "a5a161f54644191d024ece1ef8f3b0f23f252dc6e6fbee0c7dcbc15edfdeb901",
             "bytes": 45642,

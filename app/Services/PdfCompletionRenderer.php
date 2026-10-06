@@ -27,7 +27,10 @@ final readonly class PdfCompletionRenderer
         'cache' => true,
     ];
 
-    public function __construct(private CanonicalJson $canonicalJson) {}
+    public function __construct(
+        private CanonicalJson $canonicalJson,
+        private PdfFontCoverage $fontCoverage,
+    ) {}
 
     public function render(Envelope $envelope): CompletedPdf
     {
@@ -74,13 +77,14 @@ final readonly class PdfCompletionRenderer
             ]);
 
             $cropBox = $template->getMediaBox();
-            $placementX = 0.0;
-            $placementY = 0.0;
-            if ($template->getRotation() === 90) {
-                // tc-lib's rotation matrix assumes a zero-origin CropBox; offset through its placement API.
-                $placementX = -$cropBox[1];
-                $placementY = -$cropBox[0];
-            }
+            // tc-lib's rotation matrices assume a zero-origin selected box. Its y placement uses top-left coordinates.
+            [$placementX, $placementY] = match ($template->getRotation()) {
+                0 => [-$cropBox[0], $cropBox[1]],
+                90 => [-$cropBox[1], -$cropBox[0]],
+                180 => [$cropBox[0], -$cropBox[1]],
+                270 => [$cropBox[1], $cropBox[0]],
+                default => throw new RuntimeException('The source page has an unsupported rotation.'),
+            };
             $pdf->useImportedPage(
                 $template,
                 $placementX,
@@ -117,6 +121,9 @@ final readonly class PdfCompletionRenderer
 
                 $typed = ($field->value['kind'] ?? null) === 'typed';
                 $font = $typed ? $scriptFont : $textFont;
+                $fontName = $typed ? PdfFontCoverage::SCRIPT : PdfFontCoverage::TEXT;
+                $text = $this->fieldText($field);
+                $this->fontCoverage->assertSupported($fontName, $text);
                 $pdf->page->addContent(sprintf(
                     "q %F %F %F %F re W n\n",
                     $x,
@@ -124,9 +131,10 @@ final readonly class PdfCompletionRenderer
                     $width,
                     $height,
                 ));
-                $pdf->page->addContent($font['out']);
-                $pdf->page->addContent($pdf->getTextCell(
-                    txt: $this->fieldText($field),
+                $pdf->page->addContent($this->textCell(
+                    pdf: $pdf,
+                    font: $font,
+                    text: $text,
                     posx: $x,
                     posy: $y,
                     width: $width,
@@ -246,19 +254,21 @@ final readonly class PdfCompletionRenderer
         foreach ($lines as $line) {
             array_push($wrapped, ...$this->wrap($line, 96));
         }
+        $this->fontCoverage->assertSupported(PdfFontCoverage::TEXT, implode("\n", $wrapped));
 
         $pageCount = 0;
         $y = 0.0;
         foreach ($wrapped as $line) {
             if ($pageCount === 0 || $y > 742) {
                 $pdf->addPage(['format' => '', 'width' => 612, 'height' => 792, 'orientation' => 'P']);
-                $pdf->page->addContent($font['out']);
                 $pageCount++;
                 $y = 42;
 
                 if ($pageCount > 1) {
-                    $pdf->page->addContent($pdf->getTextCell(
-                        txt: 'Certificate of Completion (continued)',
+                    $pdf->page->addContent($this->textCell(
+                        pdf: $pdf,
+                        font: $font,
+                        text: 'Certificate of Completion (continued)',
                         posx: 42,
                         posy: $y,
                         width: 528,
@@ -271,8 +281,10 @@ final readonly class PdfCompletionRenderer
                 }
             }
 
-            $pdf->page->addContent($pdf->getTextCell(
-                txt: $line,
+            $pdf->page->addContent($this->textCell(
+                pdf: $pdf,
+                font: $font,
+                text: $line,
                 posx: 42,
                 posy: $y,
                 width: 528,
@@ -345,6 +357,39 @@ final readonly class PdfCompletionRenderer
             FieldType::Signature, FieldType::Initials => (string) ($field->value['text'] ?? ''),
             FieldType::DateSigned, FieldType::Text => (string) ($field->value['value'] ?? ''),
         };
+    }
+
+    /** @param array<string, mixed> $font */
+    private function textCell(
+        Tcpdf $pdf,
+        array $font,
+        string $text,
+        float $posx,
+        float $posy,
+        float $width,
+        float $height,
+        string $valign,
+        string $halign,
+        bool $drawcell,
+        string $fit = '',
+    ): string {
+        $pdf->font->cloneFont($pdf->pon, $font['idx']);
+
+        try {
+            return $pdf->getTextCell(
+                txt: $text,
+                posx: $posx,
+                posy: $posy,
+                width: $width,
+                height: $height,
+                valign: $valign,
+                halign: $halign,
+                drawcell: $drawcell,
+                fit: $fit,
+            );
+        } finally {
+            $pdf->font->popLastFont();
+        }
     }
 
     private function normalizedDrawing(Field $field): string

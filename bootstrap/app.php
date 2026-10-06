@@ -2,9 +2,11 @@
 
 use App\Console\Commands\OptimizeTailwind;
 use App\Console\Commands\PreparePdfFonts;
+use App\Http\Middleware\PreventVerificationCaching;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -17,7 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
         PreparePdfFonts::class,
     ])
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        $middleware->prependToPriorityList(ThrottleRequests::class, PreventVerificationCaching::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->dontFlash([

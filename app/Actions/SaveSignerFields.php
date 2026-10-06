@@ -14,6 +14,7 @@ use App\Exceptions\SigningAccessDenied;
 use App\Models\Envelope;
 use App\Models\Field;
 use App\Models\Signer;
+use App\Services\PdfFontCoverage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -21,6 +22,8 @@ use Illuminate\Validation\ValidationException;
 
 final class SaveSignerFields
 {
+    public function __construct(private readonly PdfFontCoverage $fontCoverage) {}
+
     /** @param array<string|int, mixed> $responses */
     public function handle(
         Signer $boundSigner,
@@ -133,13 +136,13 @@ final class SaveSignerFields
     {
         return match ($field->type) {
             FieldType::DateSigned => ['kind' => 'date', 'value' => now()->utc()->toDateString()],
-            FieldType::Text => ['kind' => 'text', 'value' => $this->plainText($response['text'] ?? null, 2000)],
+            FieldType::Text => ['kind' => 'text', 'value' => $this->plainText($response['text'] ?? null, 2000, PdfFontCoverage::TEXT)],
             FieldType::Checkbox => ['kind' => 'checkbox', 'checked' => filter_var($response['checked'] ?? false, FILTER_VALIDATE_BOOL)],
             FieldType::Signature, FieldType::Initials => $this->signatureValue($field, $response, $createdPaths),
         };
     }
 
-    private function plainText(mixed $value, int $maximum): string
+    private function plainText(mixed $value, int $maximum, string $font): string
     {
         if (! is_string($value)) {
             throw ValidationException::withMessages(['fields' => 'Enter a value for every completed text field.']);
@@ -149,6 +152,9 @@ final class SaveSignerFields
 
         if ($value === '' || mb_strlen($value) > $maximum || strip_tags($value) !== $value || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value)) {
             throw ValidationException::withMessages(['fields' => 'A text field contains unsupported content.']);
+        }
+        if (! $this->fontCoverage->supports($font, $value)) {
+            throw ValidationException::withMessages(['fields' => 'A field contains characters that cannot appear in the completed PDF.']);
         }
 
         return $value;
@@ -180,7 +186,7 @@ final class SaveSignerFields
         if (($response['kind'] ?? null) === 'typed') {
             return [
                 'kind' => 'typed',
-                'text' => $this->plainText($response['typed'] ?? null, 100),
+                'text' => $this->plainText($response['typed'] ?? null, 100, PdfFontCoverage::SCRIPT),
             ];
         }
 

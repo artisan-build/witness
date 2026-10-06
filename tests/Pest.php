@@ -61,7 +61,7 @@ function something(): void
     // ..
 }
 
-function createSigningEnvelope(array $types = [], bool $send = true): array
+function createSigningEnvelope(array $types = [], bool $send = true, string $signerName = 'Alex Signer'): array
 {
     Storage::fake('local');
     Mail::fake();
@@ -85,7 +85,7 @@ function createSigningEnvelope(array $types = [], bool $send = true): array
         hash('sha256', $pdf),
     );
     $signer = $envelope->signers()->create([
-        'name' => 'Alex Signer',
+        'name' => $signerName,
         'email' => 'alex-'.Str::uuid().'@example.test',
         'position' => 0,
     ]);

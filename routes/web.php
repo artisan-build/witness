@@ -10,6 +10,7 @@ use App\Http\Controllers\TemplateController;
 use App\Http\Controllers\VerificationController;
 use App\Http\Middleware\AddSigningSecurityHeaders;
 use App\Http\Middleware\EnsureSelectedTeam;
+use App\Http\Middleware\PreventVerificationCaching;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Illuminate\Support\Facades\Route;
@@ -26,9 +27,12 @@ Route::middleware([AddSigningSecurityHeaders::class, 'throttle:signing-public'])
     Route::get('/sign/{token}', [SigningController::class, 'open'])->name('sign.open');
 });
 
-Route::middleware([AddSigningSecurityHeaders::class, 'throttle:verification-public'])->group(function (): void {
+Route::middleware([PreventVerificationCaching::class, AddSigningSecurityHeaders::class, 'throttle:verification-public'])->group(function (): void {
     Route::get('/verify', [VerificationController::class, 'index'])->name('verify.index');
     Route::post('/verify', [VerificationController::class, 'store'])->name('verify.store');
+});
+
+Route::middleware([AddSigningSecurityHeaders::class, 'throttle:verification-public'])->group(function (): void {
     Route::get('/final/{delivery}', [DocumentController::class, 'recipient'])
         ->middleware('signed')
         ->name('final.recipient.download');

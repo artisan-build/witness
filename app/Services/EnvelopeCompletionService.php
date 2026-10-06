@@ -119,30 +119,30 @@ final readonly class EnvelopeCompletionService
             ->where('status', MailDeliveryStatus::Pending->value)
             ->orderBy('id')
             ->each(function (MailDelivery $delivery) use ($envelope, $document): void {
+                $path = $document->final_storage_path;
+                if ($path === null || ! Storage::exists($path)) {
+                    throw new RuntimeException('The final document is unavailable for delivery.');
+                }
+
+                $bytes = Storage::get($path);
+                if (! hash_equals((string) $document->final_sha256, hash('sha256', $bytes))) {
+                    throw new RuntimeException('The final document failed its delivery integrity check.');
+                }
+
+                $recipient = new Address($delivery->recipient_email, $delivery->recipient_name);
+                $mailable = new CompletedDocument(
+                    $envelope,
+                    $document,
+                    $delivery,
+                    self::attachesFinal(strlen($bytes)),
+                    URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]),
+                );
+                $mailable->render();
+                $pendingMail = Mail::mailer((string) config('mail.default'))->to($recipient);
+
                 $this->mailDelivery->deliver(
                     $delivery,
-                    function () use ($delivery, $envelope, $document): void {
-                        $path = $document->final_storage_path;
-                        if ($path === null || ! Storage::exists($path)) {
-                            throw new RuntimeException('The final document is unavailable for delivery.');
-                        }
-
-                        $bytes = Storage::get($path);
-                        if (! hash_equals((string) $document->final_sha256, hash('sha256', $bytes))) {
-                            throw new RuntimeException('The final document failed its delivery integrity check.');
-                        }
-
-                        Mail::mailer((string) config('mail.default'))
-                            ->to(new Address($delivery->recipient_email, $delivery->recipient_name))->send(
-                                new CompletedDocument(
-                                    $envelope,
-                                    $document,
-                                    $delivery,
-                                    self::attachesFinal(strlen($bytes)),
-                                    URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]),
-                                ),
-                            );
-                    },
+                    fn () => $pendingMail->send($mailable),
                     AuditEventType::FinalDelivered,
                     AuditActorType::System,
                     payload: [

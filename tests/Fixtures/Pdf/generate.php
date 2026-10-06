@@ -74,6 +74,27 @@ function pageContent(string $label, float $width, float $height, bool $withImage
     return $content;
 }
 
+/** @param list<float|int> $crop */
+function croppedPageContent(string $label, array $crop): string
+{
+    [$x0, $y0, $x1, $y1] = array_map(static fn (float|int $value): float => (float) $value, $crop);
+    $width = $x1 - $x0;
+    $height = $y1 - $y0;
+    $left = $x0 + 6;
+    $right = $x1 - 12;
+    $top = $y1 - 12;
+    $bottom = $y0 + 6;
+    $content = 'q 1 w 0 0 0 RG '.($x0 + 2).' '.($y0 + 2).' '.($width - 4).' '.($height - 4)." re S Q\n";
+    $content .= "q 1 0 0 rg {$left} {$top} 6 6 re f Q\n";
+    $content .= "q 0 1 0 rg {$right} {$top} 6 6 re f Q\n";
+    $content .= "q 0 0 1 rg {$left} {$bottom} 6 6 re f Q\n";
+    $content .= "q 1 0 1 rg {$right} {$bottom} 6 6 re f Q\n";
+    $content .= 'q 1 0.5 0 rg '.(($x0 + $x1) / 2 - 3).' '.(($y0 + $y1) / 2 - 3)." 6 6 re f Q\n";
+    $content .= 'BT /F1 14 Tf '.($x0 + 16).' '.($y1 - 28).' Td ('.literal($label).") Tj ET\n";
+
+    return $content;
+}
+
 /** @param list<array{media: list<float|int>, crop: list<float|int>, rotate: int, label: string}> $pages */
 function classicFixture(array $pages): string
 {
@@ -95,7 +116,10 @@ function classicFixture(array $pages): string
         $objects[$pageObject] = "<< /Type /Page /Parent 2 0 R /MediaBox [{$media}] /CropBox [{$crop}] /Rotate {$page['rotate']} /Resources {$resources} /Contents {$contentObject} 0 R >>";
         $width = (float) $page['media'][2] - (float) $page['media'][0];
         $height = (float) $page['media'][3] - (float) $page['media'][1];
-        $objects[$contentObject] = streamObject('', pageContent($page['label'], $width, $height));
+        $content = ($page['crop_fiducials'] ?? false) === true
+            ? croppedPageContent($page['label'], $page['crop'])
+            : pageContent($page['label'], $width, $height);
+        $objects[$contentObject] = streamObject('', $content);
     }
 
     $objects[2] = '<< /Type /Pages /Kids ['.implode(' ', $kids)."] /Count {$pageCount} >>";
@@ -242,6 +266,34 @@ $fixtures = [
             ['media_box' => [0, 0, 300, 500], 'crop_box' => [20, 30, 280, 470], 'rotation' => 90, 'displayed' => [440, 260]],
             ['media_box' => [0, 0, 1008, 612], 'crop_box' => [0, 0, 1008, 612], 'rotation' => 270, 'displayed' => [612, 1008]],
         ],
+    ],
+    'nonzero-cropbox-rotations.pdf' => [
+        'bytes' => classicFixture(array_map(
+            static fn (int $rotation): array => [
+                'media' => [0, 0, 300, 500],
+                'crop' => [20, 30, 280, 470],
+                'rotate' => $rotation,
+                'label' => "CROPBOX ORIGIN Rotate {$rotation}",
+                'crop_fiducials' => true,
+            ],
+            [0, 90, 180, 270],
+        )),
+        'pages' => array_map(
+            static fn (int $rotation): array => [
+                'media_box' => [0, 0, 300, 500],
+                'crop_box' => [20, 30, 280, 470],
+                'rotation' => $rotation,
+                'displayed' => in_array($rotation, [90, 270], true) ? [440, 260] : [260, 440],
+                'label' => "CROPBOX ORIGIN Rotate {$rotation}",
+                'label_origin' => match ($rotation) {
+                    0 => [16, 412],
+                    90 => [412, 244],
+                    180 => [244, 28],
+                    270 => [28, 16],
+                },
+            ],
+            [0, 90, 180, 270],
+        ),
     ],
     'scanned-image-letter.pdf' => [
         'bytes' => scannedFixture(),

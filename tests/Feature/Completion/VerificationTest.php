@@ -23,10 +23,12 @@ it('matches only an exact completed final PDF and stores no verification upload'
 
     $this->get(route('verify.index'))
         ->assertOk()
+        ->assertHeader('Cache-Control', 'no-store, private')
         ->assertSee('data-testid="verify-upload"', false);
     $this->post(route('verify.store'), [
         'verification_document' => UploadedFile::fake()->createWithContent('completed.pdf', $final),
     ])->assertOk()
+        ->assertHeader('Cache-Control', 'no-store, private')
         ->assertSeeText($envelope->title)
         ->assertSeeText('Alex Signer')
         ->assertSeeText('Verified completed document');
@@ -35,12 +37,26 @@ it('matches only an exact completed final PDF and stores no verification upload'
         $this->post(route('verify.store'), [
             'verification_document' => UploadedFile::fake()->createWithContent('candidate.pdf', $bytes),
         ])->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
             ->assertSeeText('No completed document match')
             ->assertDontSeeText($envelope->title)
             ->assertDontSeeText('Alex Signer');
     }
 
     expect(Storage::allFiles())->toBe($filesBefore);
+});
+
+it('prevents storage of verification validation and throttle responses', function (): void {
+    $this->post(route('verify.store'), [])
+        ->assertRedirect()
+        ->assertHeader('Cache-Control', 'no-store, private');
+
+    for ($request = 1; $request <= 9; $request++) {
+        $this->get(route('verify.index'))->assertOk();
+    }
+    $this->get(route('verify.index'))
+        ->assertTooManyRequests()
+        ->assertHeader('Cache-Control', 'no-store, private');
 });
 
 it('does not resolve a human user and throttles verification by IP', function (): void {

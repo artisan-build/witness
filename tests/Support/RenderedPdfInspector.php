@@ -122,6 +122,94 @@ final class RenderedPdfInspector
     /** @return array{x: float, y: float} */
     public function sourceTextOriginOnPage(int $page, string $text): array
     {
+        $form = $this->sourceForm($page);
+        $number = '(-?[\d.]+)';
+        if (! preg_match(
+            '/'.$number.'\s+'.$number.'\s+Td\s+\('.preg_quote($text, '/').'\)\s+Tj/',
+            $form['content'],
+            $origin,
+        )) {
+            throw new RuntimeException('The imported source text origin could not be inspected.');
+        }
+
+        return $this->sourcePointOnPage($page, (float) $origin[1], (float) $origin[2]);
+    }
+
+    /** @return list<array{x: float, y: float}> */
+    public function sourceFiducialCentersOnPage(int $page): array
+    {
+        $number = '(-?[\d.]+)';
+        preg_match_all(
+            '/q\s+(?:1 0 0|0 1 0|0 0 1|1 0 1|1 0\.5 0)\s+rg\s+'.$number.'\s+'.$number.'\s+6(?:\.0+)?\s+6(?:\.0+)?\s+re\s+f\s+Q/',
+            $this->sourceForm($page)['content'],
+            $matches,
+            PREG_SET_ORDER,
+        );
+
+        return array_map(
+            fn (array $match): array => $this->sourcePointOnPage(
+                $page,
+                (float) $match[1] + 3,
+                (float) $match[2] + 3,
+            ),
+            $matches,
+        );
+    }
+
+    /** @return list<array{font: string, text: string}> */
+    public function textRuns(int $page): array
+    {
+        $pageData = $this->pages[$page - 1] ?? null;
+        if ($pageData === null) {
+            throw new RuntimeException('The rendered PDF page does not exist.');
+        }
+
+        $pageObject = $this->objects[$pageData['object']];
+        $resourceObject = $pageObject;
+        if (preg_match('/\/Resources (\d+) 0 R/', $pageObject, $resourceReference)) {
+            $resourceObject = $this->objects[(int) $resourceReference[1]] ?? '';
+        }
+
+        preg_match_all('/\/(F\d+)\s+(\d+)\s+0\s+R/', $resourceObject, $references, PREG_SET_ORDER);
+        $fonts = [];
+        foreach ($references as $reference) {
+            $fontObject = $this->objects[(int) $reference[2]] ?? '';
+            if (! preg_match('/\/BaseFont \/([^\s\/]+)/', $fontObject, $baseFont)
+                || ! preg_match('/\/ToUnicode (\d+) 0 R/', $fontObject, $unicodeReference)) {
+                continue;
+            }
+            $fonts[$reference[1]] = [
+                'name' => preg_replace('/^[A-Z]{6}\+/', '', $baseFont[1]) ?? $baseFont[1],
+                'map' => $this->unicodeMap((int) $unicodeReference[1]),
+            ];
+        }
+
+        $decoded = [];
+        $content = $this->pageContent($page);
+        foreach ($this->literalStringsWithOffsets($content) as $literal) {
+            preg_match_all(
+                '/\/(F\d+)\s+[\d.]+\s+Tf\b/',
+                substr($content, 0, $literal['offset']),
+                $operators,
+                PREG_SET_ORDER,
+            );
+            $operator = end($operators);
+            $font = is_array($operator) ? ($fonts[$operator[1]] ?? null) : null;
+            if ($font === null) {
+                continue;
+            }
+            $text = $this->decodeCompositeText($this->decodeLiteral($literal['literal']), $font['map']);
+            if ($text !== null) {
+                $decoded[] = ['font' => $font['name'], 'text' => $text];
+            }
+        }
+
+        return $decoded;
+    }
+
+    /** @return array{x: float, y: float} */
+    private function sourcePointOnPage(int $page, float $sourceX, float $sourceY): array
+    {
         $number = '(-?[\d.]+)';
         if (! preg_match(
             '/q\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+cm\s+\/IMP\d+\s+Do\s+Q/',
@@ -136,25 +224,30 @@ final class RenderedPdfInspector
             '/\/Matrix \[\s*'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s+'.$number.'\s*\]/',
             $form['dictionary'],
             $matrix,
-        ) || ! preg_match(
-            '/'.$number.'\s+'.$number.'\s+Td\s+\('.preg_quote($text, '/').'\)\s+Tj/',
-            $form['content'],
-            $origin,
         )) {
-            throw new RuntimeException('The imported source text origin could not be inspected.');
+            throw new RuntimeException('The imported source matrix could not be inspected.');
         }
 
-        $x = ((float) $matrix[1] * (float) $origin[1])
-            + ((float) $matrix[3] * (float) $origin[2])
-            + (float) $matrix[5];
-        $y = ((float) $matrix[2] * (float) $origin[1])
-            + ((float) $matrix[4] * (float) $origin[2])
-            + (float) $matrix[6];
+        $x = ((float) $matrix[1] * $sourceX) + ((float) $matrix[3] * $sourceY) + (float) $matrix[5];
+        $y = ((float) $matrix[2] * $sourceX) + ((float) $matrix[4] * $sourceY) + (float) $matrix[6];
 
         return [
             'x' => ((float) $placement[1] * $x) + ((float) $placement[3] * $y) + (float) $placement[5],
             'y' => ((float) $placement[2] * $x) + ((float) $placement[4] * $y) + (float) $placement[6],
         ];
+    }
+
+    /** @return array<string, string|false> */
+    private function unicodeMap(int $object): array
+    {
+        $stream = $this->stream($object);
+        preg_match_all('/<([0-9a-f]+)>\s+<([0-9a-f]+)>/i', $stream, $characters, PREG_SET_ORDER);
+        $map = [];
+        foreach ($characters as $character) {
+            $map[strtoupper($character[1])] = hex2bin($character[2]);
+        }
+
+        return $map;
     }
 
     public function renderedText(?int $page = null): string
@@ -200,6 +293,12 @@ final class RenderedPdfInspector
     /** @return list<string> */
     private function literalStrings(string $stream): array
     {
+        return array_column($this->literalStringsWithOffsets($stream), 'literal');
+    }
+
+    /** @return list<array{literal: string, offset: int}> */
+    private function literalStringsWithOffsets(string $stream): array
+    {
         $strings = [];
         $offset = 0;
         while (($end = strpos($stream, ') Tj', $offset)) !== false) {
@@ -216,7 +315,10 @@ final class RenderedPdfInspector
                     continue;
                 }
 
-                $strings[] = substr($stream, $start + 1, $end - $start - 1);
+                $strings[] = [
+                    'literal' => substr($stream, $start + 1, $end - $start - 1),
+                    'offset' => $start,
+                ];
                 break;
             }
             $offset = $end + strlen(') Tj');
@@ -242,13 +344,16 @@ final class RenderedPdfInspector
         }
 
         $start = $startMatch[0][1] + strlen($startMatch[0][0]);
-        if (! preg_match('/\r?\nendstream/', $object, $endMatch, PREG_OFFSET_CAPTURE, $start)) {
-            throw new RuntimeException('The rendered PDF stream is incomplete.');
+        $dictionary = substr($object, 0, $start);
+        if (preg_match('/\/Length\s+(\d+)\b/', $dictionary, $lengthMatch)) {
+            $stream = substr($object, $start, (int) $lengthMatch[1]);
+        } else {
+            if (! preg_match('/\r?\nendstream/', $object, $endMatch, PREG_OFFSET_CAPTURE, $start)) {
+                throw new RuntimeException('The rendered PDF stream is incomplete.');
+            }
+            $stream = substr($object, $start, $endMatch[0][1] - $start);
         }
-
-        $end = $endMatch[0][1];
-        $stream = substr($object, $start, $end - $start);
-        if (! str_contains(substr($object, 0, $start), '/FlateDecode')) {
+        if (! str_contains($dictionary, '/FlateDecode')) {
             return $stream;
         }
 

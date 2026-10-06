@@ -38,6 +38,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\Support\RenderedPdfInspector;
 
 /** @return array{Envelope, Signer, CompletedPdf} */
@@ -79,7 +80,7 @@ function completeFixtureEnvelope(
         hash('sha256', $bytes),
     );
     $signer = $envelope->signers()->create([
-        'name' => 'Alex Signer',
+        'name' => 'Alex Signer Α',
         'email' => $signerEmail,
         'position' => 0,
     ]);
@@ -137,7 +138,7 @@ function completeFixtureEnvelope(
     $responses = [];
     foreach ($signer->fields()->orderBy('id')->get() as $field) {
         $responses[$field->getKey()] = $field->type === FieldType::Text
-            ? ['text' => 'Approved (literal) \\ / [safe]']
+            ? ['text' => 'Approved Α (literal) \\ / [safe]']
             : ['kind' => 'typed', 'typed' => 'Alex Signer'];
     }
     resolve(SaveSignerFields::class)->handle($signer, $responses, '192.0.2.11', 'Completion test');
@@ -250,10 +251,25 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
         $sourceForm = $inspector->sourceForm($index + 1);
         $expectedMatrix = match ($expectedPage['rotation']) {
             90 => [0, -1, 1, 0, 0, $expectedPage['crop_box'][2] - $expectedPage['crop_box'][0]],
+            180 => [-1, 0, 0, -1, $expectedPage['crop_box'][2] - $expectedPage['crop_box'][0], $expectedPage['crop_box'][3] - $expectedPage['crop_box'][1]],
             270 => [0, 1, -1, 0, $expectedPage['crop_box'][3] - $expectedPage['crop_box'][1], 0],
             default => [1, 0, 0, 1, 0, 0],
         };
         expect($sourceForm['dictionary'])->toContain('/Matrix ['.implode(' ', $expectedMatrix));
+
+        if (isset($expectedPage['label'], $expectedPage['label_origin'])) {
+            $labelOrigin = $inspector->sourceTextOriginOnPage($index + 1, $expectedPage['label']);
+            expect(abs($labelOrigin['x'] - $expectedPage['label_origin'][0]))->toBeLessThanOrEqual(0.01)
+                ->and(abs($labelOrigin['y'] - $expectedPage['label_origin'][1]))->toBeLessThanOrEqual(0.01)
+                ->and($labelOrigin['x'])->toBeGreaterThan(0)->toBeLessThan($page['width'])
+                ->and($labelOrigin['y'])->toBeGreaterThan(0)->toBeLessThan($page['height']);
+            $fiducials = $inspector->sourceFiducialCentersOnPage($index + 1);
+            expect($fiducials)->toHaveCount(5);
+            foreach ($fiducials as $fiducial) {
+                expect($fiducial['x'])->toBeGreaterThan(0)->toBeLessThan($page['width'])
+                    ->and($fiducial['y'])->toBeGreaterThan(0)->toBeLessThan($page['height']);
+            }
+        }
 
         if ($fixture === 'rotated-mixed-sizes.pdf' && $index === 1) {
             $labelOrigin = $inspector->sourceTextOriginOnPage(
@@ -276,7 +292,7 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
                 ->toContain('0 0 1 rg')
                 ->toContain('1 0 1 rg')
                 ->toContain('1 0.5 0 rg')
-                ->toContain(match ($fixture) {
+                ->toContain($expectedPage['label'] ?? match ($fixture) {
                     'classic-1.4-letter.pdf' => 'CLASSIC-1.4',
                     'object-stream-1.7-a4.pdf' => 'OBJECT-STREAM-1.7',
                     default => 'PAGE '.($index + 1).' MediaBox',
@@ -312,8 +328,79 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
     'classic PDF 1.4' => 'classic-1.4-letter.pdf',
     'object stream PDF 1.7' => 'object-stream-1.7-a4.pdf',
     'rotated mixed sizes' => 'rotated-mixed-sizes.pdf',
+    'nonzero CropBox at every rotation' => 'nonzero-cropbox-rotations.pdf',
     'image-only scan' => 'scanned-image-letter.pdf',
 ]);
+
+it('emits legible text with Noto Sans and typed signatures with Pacifico', function (): void {
+    [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf');
+    $inspector = new RenderedPdfInspector(Storage::get($envelope->document->final_storage_path));
+    $sourceRuns = $inspector->textRuns(1);
+    $certificateRuns = $inspector->textRuns(2);
+    $sourceNotoText = collect($sourceRuns)->where('font', 'NotoSans-Regular')->pluck('text')->implode('');
+
+    expect($sourceNotoText)->toContain('Approved Α (literal) \\ / [safe]')
+        ->and($sourceRuns)->toContain(['font' => 'Pacifico-Regular', 'text' => 'Alex Signer'])
+        ->and($certificateRuns)->toContain(['font' => 'NotoSans-Regular', 'text' => 'Alex Signer Α <alex@example.test>']);
+});
+
+it('rejects signer field characters outside the selected PDF font before signing', function (FieldType $type, array $response): void {
+    $types = $type === FieldType::Text ? [FieldType::Signature, FieldType::Text] : [$type];
+    [$envelope, $signer] = createSigningEnvelope($types);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update([
+            'status' => SignerStatus::Viewed,
+            'otp_verified_at' => now()->subMinutes(2),
+            'consented_at' => now()->subMinute(),
+            'updated_at' => now(),
+        ]);
+    });
+    $field = $signer->fields()->where('type', $type)->sole();
+
+    expect(fn () => resolve(SaveSignerFields::class)->handle(
+        $signer->refresh(),
+        [$field->getKey() => $response],
+        '192.0.2.15',
+        'Unsupported glyph test',
+    ))->toThrow(ValidationException::class, 'cannot appear in the completed PDF')
+        ->and($field->fresh()->value)->toBeNull()
+        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and($envelope->document->fresh()->final_storage_path)->toBeNull()
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Completed)->count())->toBe(0)
+        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(0);
+})->with([
+    'CJK ordinary text' => [FieldType::Text, ['text' => '李明']],
+    'emoji typed signature' => [FieldType::Signature, ['kind' => 'typed', 'typed' => 'Alex 🙂']],
+]);
+
+it('fails completion before final state when existing certificate evidence has missing glyphs', function (string $name): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature], signerName: $name);
+    $field = $signer->fields()->sole();
+    resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $field,
+        ['kind' => 'typed', 'text' => 'Alex Signer'],
+        now(),
+    );
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update([
+            'status' => SignerStatus::Signed,
+            'signed_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    expect(fn () => resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))
+        ->toThrow(RuntimeException::class, 'unsupported by its PDF font')
+        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and($envelope->document->fresh()->final_storage_path)->toBeNull()
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Completed)->count())->toBe(0)
+        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(0);
+    Mail::assertSent(CompletedDocument::class, 0);
+})->with(['CJK' => '李明', 'emoji' => 'Alex 🙂']);
 
 it('rejects the encrypted completion fixture before any final artifact is written', function (): void {
     $bytes = file_get_contents(base_path('tests/Fixtures/Pdf/encrypted-password.pdf'));
@@ -515,4 +602,25 @@ it('marks a stale ambiguous final handoff unknown without false delivery or dupl
     expect($ambiguous->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
         ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(2)
         ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(1);
+});
+
+it('keeps a final delivery pending when document preflight fails and retries after repair', function (): void {
+    [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf', deliver: false);
+    $path = $envelope->document->final_storage_path;
+    $bytes = Storage::get($path);
+    Storage::delete($path);
+
+    expect(fn () => resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))
+        ->toThrow(RuntimeException::class, 'unavailable')
+        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->where('status', MailDeliveryStatus::Pending->value)->count())->toBe(2)
+        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->where('status', MailDeliveryStatus::Unknown->value)->count())->toBe(0)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(0);
+    Mail::assertSent(CompletedDocument::class, 0);
+
+    Storage::put($path, $bytes);
+    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+
+    expect($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->where('status', MailDeliveryStatus::Sent->value)->count())->toBe(2)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(2);
+    Mail::assertSent(CompletedDocument::class, 2);
 });
