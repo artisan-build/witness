@@ -133,7 +133,7 @@ it('rejects builder relation and parent cascade changes to a frozen envelope', f
         ->and(fn () => DB::transaction(fn () => Signer::query()->whereKey($signer)->delete()))
         ->toThrow(QueryException::class, 'cannot be removed after send')
         ->and(fn () => DB::transaction(fn () => Envelope::query()->whereKey($envelope)->delete()))
-        ->toThrow(QueryException::class, 'Only draft envelopes');
+        ->toThrow(QueryException::class, 'Only the scoped destructive domain action may delete this envelope');
 
     expect($field->fresh())->not->toBeNull()
         ->and($signer->fresh())->not->toBeNull();
