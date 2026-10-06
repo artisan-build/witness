@@ -6,6 +6,7 @@ use App\Actions\CreateDraftEnvelope;
 use App\Actions\SaveSignerFields;
 use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
+use App\Actions\StoreFinalDocument;
 use App\Actions\UpdateFieldResponse;
 use App\Domain\Audit\AuditChainVerifier;
 use App\Enums\AuditActorType;
@@ -21,7 +22,9 @@ use App\Mail\CompletedDocument;
 use App\Models\Envelope;
 use App\Models\Signer;
 use App\Models\Team;
+use App\Services\CompletedPdf;
 use App\Services\EnvelopeCompletionService;
+use App\Services\OutboundMailDelivery;
 use App\Services\PdfCompletionRenderer;
 use ArtisanBuild\BuiltForCloud\User;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
@@ -31,15 +34,21 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 
-/** @return array{Envelope, Signer} */
+/** @return array{Envelope, Signer, CompletedPdf} */
 function completeFixtureEnvelope(
     string $fixture,
     string $signerEmail = 'alex@example.test',
     ?Team $team = null,
     ?User $sender = null,
+    bool $resetStorage = true,
+    bool $deliver = true,
 ): array {
-    Storage::fake('local');
+    if ($resetStorage) {
+        Storage::fake('local');
+    }
     Mail::fake();
     $bytes = file_get_contents(base_path('tests/Fixtures/Pdf/'.$fixture));
     $manifest = json_decode(
@@ -131,13 +140,37 @@ function completeFixtureEnvelope(
     resolve(SaveSignerFields::class)->handle($signer, $responses, '192.0.2.11', 'Completion test');
     Event::fake([EnvelopeReadyForCompletion::class]);
     resolve(SignEnvelope::class)->handle($signer->refresh(), '192.0.2.11', 'Completion test');
-    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+    $rendered = resolve(PdfCompletionRenderer::class)->render($envelope->refresh());
+    if ($deliver) {
+        resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+    } else {
+        $finalPath = 'documents/'.$envelope->team_id.'/completed/'.Str::uuid().'.pdf';
+        Storage::put($finalPath, $rendered->bytes);
+        resolve(StoreFinalDocument::class)->handle(
+            $envelope,
+            $finalPath,
+            $rendered->sha256,
+            $rendered->contentSha256,
+            $rendered->certificateChainHead,
+        );
+    }
 
-    return [$envelope->refresh(), $signer->refresh()];
+    return [$envelope->refresh(), $signer->refresh(), $rendered];
+}
+
+function decodedPdfStreams(string $pdf): string
+{
+    preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $pdf, $matches);
+
+    return collect($matches[1])->map(function (string $stream): string {
+        $decoded = @gzuncompress($stream);
+
+        return is_string($decoded) ? $decoded : $stream;
+    })->implode("\n");
 }
 
 it('completes the required PDF corpus with strict page geometry and idempotent delivery', function (string $fixture): void {
-    [$envelope] = completeFixtureEnvelope($fixture);
+    [$envelope, , $rendered] = completeFixtureEnvelope($fixture);
     $document = $envelope->document;
     $manifest = json_decode(file_get_contents(base_path('tests/Fixtures/Pdf/manifest.json')), true, flags: JSON_THROW_ON_ERROR);
 
@@ -158,6 +191,34 @@ it('completes the required PDF corpus with strict page geometry and idempotent d
     expect($pdf->getSourcePageCount($source))->toBeGreaterThan($sourcePages)
         ->and($pdf->getWarnings())->toBe([])
         ->and(str_contains($final, '/Subtype /Image'))->toBeTrue();
+
+    foreach ($manifest['fixtures'][$fixture]['pages'] as $index => $expectedPage) {
+        $page = $rendered->pages[$index];
+        expect(abs($page['width'] - $expectedPage['displayed'][0]))->toBeLessThanOrEqual(0.01)
+            ->and(abs($page['height'] - $expectedPage['displayed'][1]))->toBeLessThanOrEqual(0.01)
+            ->and($page['rotation'])->toBe($expectedPage['rotation']);
+        $pagePlacements = collect($rendered->placements)->where('page', $index + 1)->values();
+        foreach ([[.10, .12, .25, .05], [.62, .72, .20, .08]] as $placementIndex => $fractions) {
+            $placement = $pagePlacements[$placementIndex];
+            foreach (['x', 'y', 'width', 'height'] as $coordinateIndex => $coordinate) {
+                $dimension = $coordinateIndex % 2 === 0 ? $page['width'] : $page['height'];
+                expect(abs($placement[$coordinate] - ($fractions[$coordinateIndex] * $dimension)))
+                    ->toBeLessThanOrEqual(0.5);
+            }
+        }
+    }
+    $decoded = decodedPdfStreams($final);
+    if ($fixture === 'scanned-image-letter.pdf') {
+        expect($final)->toContain('/Width 1200')->toContain('/Height 1553')
+            ->and($decoded)->toMatch('/\/IMP\d+ Do/');
+    } else {
+        expect($decoded)->toContain('1 0.5 0 rg')
+            ->toContain(match ($fixture) {
+                'classic-1.4-letter.pdf' => 'CLASSIC-1.4',
+                'object-stream-1.7-a4.pdf' => 'OBJECT-STREAM-1.7',
+                default => 'PAGE 1 MediaBox',
+            });
+    }
 
     $deliveries = $envelope->mailDeliveries()
         ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
@@ -212,6 +273,22 @@ it('rejects the encrypted completion fixture before any final artifact is writte
         ->and($envelope->document->fresh()->final_storage_path)->toBeNull();
 });
 
+it('uses each configured default mailer and selects attachment versus signed-link delivery by size', function (string $mailer): void {
+    config(['mail.default' => $mailer]);
+    [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf');
+    Mail::assertSent(CompletedDocument::class, function (CompletedDocument $mail) use ($mailer): bool {
+        return $mail->mailer === $mailer && count($mail->attachments()) === 1;
+    });
+
+    expect(EnvelopeCompletionService::attachesFinal(10 * 1024 * 1024))->toBeTrue()
+        ->and(EnvelopeCompletionService::attachesFinal((10 * 1024 * 1024) + 1))->toBeFalse();
+    $delivery = $envelope->mailDeliveries()->firstOrFail();
+    $link = URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]);
+    $linkMail = new CompletedDocument($envelope, $envelope->document, $delivery, false, $link);
+    expect($linkMail->attachments())->toBe([])
+        ->and($linkMail->render())->toContain($link);
+})->with(['scalpels', 'array']);
+
 it('completes twice for the same sender and signer email', function (): void {
     $team = Team::factory()->create();
     $sender = UserFactory::new()->create([
@@ -220,12 +297,21 @@ it('completes twice for the same sender and signer email', function (): void {
     ]);
     $team->users()->attach($sender);
     [$first] = completeFixtureEnvelope('classic-1.4-letter.pdf', 'repeat@example.test', $team, $sender);
-    [$second] = completeFixtureEnvelope('object-stream-1.7-a4.pdf', 'repeat@example.test', $team, $sender);
+    [$second] = completeFixtureEnvelope('object-stream-1.7-a4.pdf', 'repeat@example.test', $team, $sender, false);
 
     expect($first->status)->toBe(EnvelopeStatus::Completed)
         ->and($second->status)->toBe(EnvelopeStatus::Completed)
         ->and($first->getKey())->not->toBe($second->getKey())
         ->and($first->document->final_sha256)->not->toBe($second->document->final_sha256);
+    foreach ([$first, $second] as $completedEnvelope) {
+        foreach ([
+            $completedEnvelope->document->storage_path => $completedEnvelope->document->original_sha256,
+            $completedEnvelope->document->final_storage_path => $completedEnvelope->document->final_sha256,
+        ] as $path => $hash) {
+            expect(Storage::exists($path))->toBeTrue()
+                ->and(hash('sha256', Storage::get($path)))->toBe($hash);
+        }
+    }
 });
 
 it('paginates a long certificate event list deterministically', function (): void {
@@ -329,4 +415,42 @@ it('leaves no completion state or delivery after failure and retries safely', fu
         ->and($envelope->auditEvents()->where('type', AuditEventType::Completed)->count())->toBe(1)
         ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(2);
     Mail::assertSent(CompletedDocument::class, 2);
+});
+
+it('redispatches pending final deliveries exactly once', function (): void {
+    [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf', deliver: false);
+    expect($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+        ->where('status', MailDeliveryStatus::Pending->value)->count())->toBe(2)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(0);
+    Mail::assertSent(CompletedDocument::class, 0);
+
+    Event::fake([EnvelopeReadyForCompletion::class]);
+    resolve(EnvelopeCompletionService::class)->dispatchReady();
+    Event::assertDispatchedTimes(EnvelopeReadyForCompletion::class, 1);
+    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+
+    Mail::assertSent(CompletedDocument::class, 2);
+    expect($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+        ->where('status', MailDeliveryStatus::Sent->value)->count())->toBe(2)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(2);
+});
+
+it('marks a stale ambiguous final handoff unknown without false delivery or duplicate mail', function (): void {
+    [$envelope] = completeFixtureEnvelope('classic-1.4-letter.pdf', deliver: false);
+    $ambiguous = $envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->firstOrFail();
+    $ambiguous->update([
+        'status' => MailDeliveryStatus::Sending,
+        'attempted_at' => now()->subMinutes(11),
+    ]);
+
+    resolve(OutboundMailDelivery::class)->reconcileStaleClaims();
+    expect($ambiguous->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(0);
+    resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
+
+    Mail::assertSent(CompletedDocument::class, 1);
+    expect($ambiguous->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($envelope->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument->value)->count())->toBe(2)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::FinalDelivered)->count())->toBe(1);
 });

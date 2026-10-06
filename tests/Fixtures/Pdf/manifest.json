@@ -2,8 +2,8 @@
     "generator": "tests/Fixtures/Pdf/generate.php",
     "fixtures": {
         "classic-1.4-letter.pdf": {
-            "sha256": "cc3555b3097930977f3fe36f97f87c91a1ce21a1d0d4dde8671f4297fabae908",
-            "bytes": 1518,
+            "sha256": "218bff1eb581d0d3b750c5b763839f2a847b6da65c1eff06c48f6c16adcaf785",
+            "bytes": 1528,
             "encrypted": false,
             "pages": [
                 {
@@ -28,8 +28,8 @@
             ]
         },
         "object-stream-1.7-a4.pdf": {
-            "sha256": "724a2a745af6c2db06876979942f41304e9948ae16707db458b33dfab47bb176",
-            "bytes": 1505,
+            "sha256": "2aec4d6762b0a22db6e397dd94d8d456171cfa35e22532e002c2be6e1c59b4f6",
+            "bytes": 1520,
             "encrypted": false,
             "pages": [
                 {
@@ -54,8 +54,8 @@
             ]
         },
         "rotated-mixed-sizes.pdf": {
-            "sha256": "94b2f22ca7ddb2dc9d424ebe6d0bf516c265e672d3b75c1627292cb5a641b7fc",
-            "bytes": 2496,
+            "sha256": "b023ea8e632296a7638de2cb70946848f6bae784e554978dba9b01b30fd28a20",
+            "bytes": 2524,
             "encrypted": false,
             "pages": [
                 {

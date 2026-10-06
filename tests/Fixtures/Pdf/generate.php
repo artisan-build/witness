@@ -65,6 +65,7 @@ function pageContent(string $label, float $width, float $height, bool $withImage
     $content .= "q 0 1 0 rg {$right} {$top} 6 6 re f Q\n";
     $content .= "q 0 0 1 rg 6 {$bottom} 6 6 re f Q\n";
     $content .= "q 1 0 1 rg {$right} {$bottom} 6 6 re f Q\n";
+    $content .= 'q 1 0.5 0 rg '.($width / 2 - 3).' '.($height / 2 - 3)." 6 6 re f Q\n";
     $content .= 'BT /F1 14 Tf 36 '.($height - 58).' Td ('.literal($label).") Tj ET\n";
     if ($withImage) {
         $content .= "q 48 0 0 48 36 36 cm /Im1 Do Q\n";

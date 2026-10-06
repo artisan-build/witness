@@ -15,6 +15,7 @@ use App\Events\EnvelopeReadyForCompletion;
 use App\Mail\CompletedDocument;
 use App\Models\Envelope;
 use App\Models\MailDelivery;
+use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -97,6 +98,11 @@ final readonly class EnvelopeCompletionService
             ->each(fn (int $envelopeId) => event(new EnvelopeReadyForCompletion($envelopeId)));
     }
 
+    public static function attachesFinal(int $bytes): bool
+    {
+        return $bytes <= self::ATTACHMENT_LIMIT;
+    }
+
     private function deliverPending(int $envelopeId): void
     {
         $envelope = Envelope::query()->with(['document', 'sender'])->findOrFail($envelopeId);
@@ -126,15 +132,16 @@ final readonly class EnvelopeCompletionService
                             throw new RuntimeException('The final document failed its delivery integrity check.');
                         }
 
-                        Mail::to($delivery->recipient_email, $delivery->recipient_name)->send(
-                            new CompletedDocument(
-                                $envelope,
-                                $document,
-                                $delivery,
-                                strlen($bytes) <= self::ATTACHMENT_LIMIT,
-                                URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]),
-                            ),
-                        );
+                        Mail::mailer((string) config('mail.default'))
+                            ->to(new Address($delivery->recipient_email, $delivery->recipient_name))->send(
+                                new CompletedDocument(
+                                    $envelope,
+                                    $document,
+                                    $delivery,
+                                    self::attachesFinal(strlen($bytes)),
+                                    URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]),
+                                ),
+                            );
                     },
                     AuditEventType::FinalDelivered,
                     AuditActorType::System,

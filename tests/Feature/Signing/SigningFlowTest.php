@@ -13,6 +13,8 @@ use App\Events\EnvelopeReadyForCompletion;
 use App\Mail\SigningCode;
 use App\Mail\SigningInvitation;
 use App\Services\EnvelopeCompletionService;
+use App\Services\PdfCompletionRenderer;
+use Com\Tecnick\Pdf\Tcpdf;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -47,9 +49,9 @@ it('completes and stamps every signer field type through the PR4 seam', function
     $fields = $signer->fields()->get()->keyBy(fn ($field) => $field->type->value);
     $png = 'data:image/png;base64,'.base64_encode(base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true));
     $responses = [
-        $fields[FieldType::Signature->value]->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer'],
+        $fields[FieldType::Signature->value]->getKey() => ['kind' => 'typed', 'typed' => 'Alex ) Tj ET q Signer'],
         $fields[FieldType::Initials->value]->getKey() => ['kind' => 'drawn', 'drawn' => $png],
-        $fields[FieldType::Text->value]->getKey() => ['text' => 'Approved'],
+        $fields[FieldType::Text->value]->getKey() => ['text' => 'Approved ) Tj ET /Name q Q'],
         $fields[FieldType::Checkbox->value]->getKey() => ['checked' => '1'],
     ];
     $this->post(route('sign.fields'), ['fields' => $responses])
@@ -84,6 +86,18 @@ it('completes and stamps every signer field type through the PR4 seam', function
         ->and($signerEvents->pluck('ip_address')->unique()->all())->toBe(['127.0.0.1'])
         ->and($signerEvents->pluck('user_agent')->unique()->all())->toBe(['Witness signer test']);
     Event::assertDispatched(EnvelopeReadyForCompletion::class, fn ($event) => $event->envelopeId === $envelope->getKey());
+
+    $rendered = resolve(PdfCompletionRenderer::class)->render($envelope);
+    $strict = new Tcpdf;
+    $strictSource = $strict->setImportSourceData($rendered->bytes, ['strict_limits' => true]);
+    expect($strict->getSourcePageCount($strictSource))->toBe(2 + $rendered->certificatePageCount)
+        ->and($strict->getWarnings())->toBe([])
+        ->and(collect($rendered->placements)->pluck('type')->unique()->sort()->values()->all())
+        ->toBe(collect(FieldType::cases())->map->value->sort()->values()->all())
+        ->and(collect($rendered->placements)->whereIn('kind', ['typed', 'drawn'])->pluck('kind')->unique()->sort()->values()->all())
+        ->toBe(['drawn', 'typed'])
+        ->and($rendered->bytes)->not->toContain(') Tj ET /Name q Q')
+        ->and($rendered->bytes)->toContain('/Subtype /Image');
 
     resolve(EnvelopeCompletionService::class)->complete($envelope->getKey());
     $envelope->refresh();
