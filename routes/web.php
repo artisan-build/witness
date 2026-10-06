@@ -39,6 +39,7 @@ Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])-
         Route::put('/envelopes/{envelope}/signers', [EnvelopeController::class, 'updateSigners'])->name('sender.envelopes.signers');
         Route::put('/envelopes/{envelope}/fields', [EnvelopeController::class, 'updateFields'])->name('sender.envelopes.fields');
         Route::post('/envelopes/{envelope}/send', [EnvelopeController::class, 'send'])->name('sender.envelopes.send');
+        Route::post('/envelopes/{envelope}/signers/{signer}/resend-link', [EnvelopeController::class, 'resendLink'])->name('sender.envelopes.signers.resend-link');
         Route::post('/envelopes/{envelope}/template', [EnvelopeController::class, 'saveAsTemplate'])->name('sender.envelopes.template');
         Route::get('/envelopes/{envelope}/document', [DocumentController::class, 'envelope'])->name('sender.envelopes.document.show');
 

@@ -12,5 +12,14 @@
             <label class="signing-check"><input type="checkbox" name="consent" value="1" required> I consent to use electronic records and signatures for this document.</label>
             <button class="signing-button" type="submit">Consent and review document</button>
         </form>
+        <details data-testid="signer-decline">
+            <summary>Decline to sign</summary>
+            <form method="POST" action="{{ route('sign.decline') }}" class="signing-stack">
+                @csrf
+                <label for="reason">Reason</label>
+                <textarea id="reason" name="reason" rows="4" maxlength="2000" required></textarea>
+                <button class="signing-button signing-button-danger" type="submit">Decline and notify sender</button>
+            </form>
+        </details>
     </section>
 </x-signing-layout>

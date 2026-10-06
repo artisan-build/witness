@@ -136,11 +136,47 @@ final class OutboundMailDelivery
         }
     }
 
+    public function reconcileStaleClaims(): void
+    {
+        $cutoff = now()->subMinutes(self::STALE_CLAIM_MINUTES);
+        $deliveryIds = MailDelivery::query()
+            ->where(function ($query) use ($cutoff): void {
+                $query->where(function ($query) use ($cutoff): void {
+                    $query->where('status', MailDeliveryStatus::Pending->value)
+                        ->where('created_at', '<=', $cutoff);
+                })->orWhere(function ($query) use ($cutoff): void {
+                    $query->where('status', MailDeliveryStatus::Sending->value)
+                        ->where('attempted_at', '<=', $cutoff);
+                });
+            })
+            ->orderBy('id')
+            ->pluck('id');
+
+        foreach ($deliveryIds as $deliveryId) {
+            DB::transaction(function () use ($deliveryId): void {
+                $candidate = MailDelivery::query()->find($deliveryId);
+                if ($candidate === null) {
+                    return;
+                }
+
+                Envelope::query()->lockForUpdate()->findOrFail($candidate->envelope_id);
+                Signer::query()->lockForUpdate()->findOrFail($candidate->signer_id);
+                $delivery = MailDelivery::query()->lockForUpdate()->findOrFail($deliveryId);
+                $this->markStaleClaimUnknown($delivery);
+            });
+        }
+    }
+
     /** The caller must already hold the envelope, signer, and delivery row locks. */
     public function markStaleClaimUnknown(MailDelivery $delivery): MailDelivery
     {
-        if ($delivery->status === MailDeliveryStatus::Sending
-            && $delivery->attempted_at?->lte(now()->subMinutes(self::STALE_CLAIM_MINUTES))) {
+        $cutoff = now()->subMinutes(self::STALE_CLAIM_MINUTES);
+        $stalePending = $delivery->status === MailDeliveryStatus::Pending
+            && $delivery->created_at->lte($cutoff);
+        $staleSending = $delivery->status === MailDeliveryStatus::Sending
+            && $delivery->attempted_at?->lte($cutoff);
+
+        if ($stalePending || $staleSending) {
             $delivery->update([
                 'status' => MailDeliveryStatus::Unknown,
                 'unknown_at' => now(),

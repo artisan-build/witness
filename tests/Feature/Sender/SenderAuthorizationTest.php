@@ -31,6 +31,10 @@ function senderAuthorizationFixture(): array
         'page_count' => 1,
         'original_sha256' => hash('sha256', PdfFixture::make()),
     ]);
+    $signer = $envelope->signers()->create([
+        'name' => 'Owner signer',
+        'email' => 'owner-signer@example.test',
+    ]);
     $template = Template::factory()->forOwner($teamA, $owner)->create([
         'name' => 'Owner template',
         'storage_path' => 'documents/owner-template.pdf',
@@ -38,7 +42,7 @@ function senderAuthorizationFixture(): array
     Storage::put($envelope->document->storage_path, PdfFixture::make());
     Storage::put($template->storage_path, PdfFixture::make());
 
-    return compact('owner', 'peer', 'teamA', 'teamB', 'envelope', 'template');
+    return compact('owner', 'peer', 'teamA', 'teamB', 'envelope', 'signer', 'template');
 }
 
 it('neutrally denies every sender record route across sender and selected-team boundaries', function (): void {
@@ -53,6 +57,7 @@ it('neutrally denies every sender record route across sender and selected-team b
         ['PUT', route('sender.envelopes.signers', $envelope), ['signers' => []]],
         ['PUT', route('sender.envelopes.fields', $envelope), ['fields_json' => '[]']],
         ['POST', route('sender.envelopes.send', $envelope), []],
+        ['POST', route('sender.envelopes.signers.resend-link', [$envelope, $fixture['signer']]), []],
         ['POST', route('sender.envelopes.template', $envelope), ['name' => 'Stolen template']],
         ['GET', route('sender.envelopes.document.show', $envelope), []],
         ['GET', route('sender.templates.edit', $template), []],

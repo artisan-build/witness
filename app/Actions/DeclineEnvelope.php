@@ -44,8 +44,7 @@ final readonly class DeclineEnvelope
             }
 
             if ($envelope->status !== EnvelopeStatus::Sent
-                || $signer->status !== SignerStatus::Viewed
-                || $signer->consented_at === null) {
+                || $signer->status !== SignerStatus::Viewed) {
                 throw new SigningAccessDenied;
             }
 

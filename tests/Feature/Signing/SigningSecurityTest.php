@@ -107,6 +107,41 @@ it('enforces consent before field writes or signing even when UI steps are skipp
         ->and($signer->envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(0);
 });
 
+it('allows decline after OTP verification without consent and refuses it before verification', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+
+    $this->post(route('sign.decline'), ['reason' => 'Not verified yet.'])
+        ->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false);
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and($signer->fresh()->status)->toBe(SignerStatus::Viewed)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(0);
+
+    $code = null;
+    Mail::assertSent(SigningCode::class, function (SigningCode $mail) use (&$code, $signer): bool {
+        if ($mail->signer->is($signer)) {
+            $code = $mail->code;
+        }
+
+        return $mail->signer->is($signer);
+    });
+    $this->post(route('sign.verify'), ['code' => $code])->assertRedirect(route('sign.show'));
+    $this->get(route('sign.show'))
+        ->assertOk()
+        ->assertSee('data-testid="signer-consent"', false)
+        ->assertSee('data-testid="signer-decline"', false);
+    $this->post(route('sign.decline'), ['reason' => 'I do not consent.'])
+        ->assertOk()
+        ->assertSeeText('Your decline has been recorded. The sender can see it in Witness.');
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Declined)
+        ->and($signer->fresh()->status)->toBe(SignerStatus::Declined)
+        ->and($signer->fresh()->consented_at)->toBeNull()
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(0)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Declined)->count())->toBe(1);
+});
+
 it('expires, isolates, and rotates OTPs without exposing plaintext state', function (): void {
     [, $signerA, $tokenA] = createSigningEnvelope([FieldType::Signature]);
     [, $signerB, $tokenB] = createSigningEnvelope([FieldType::Signature]);

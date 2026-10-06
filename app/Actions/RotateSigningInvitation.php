@@ -8,10 +8,9 @@ use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
 use App\Enums\MailDeliveryPurpose;
-use App\Enums\MailDeliveryStatus;
+use App\Enums\SignerStatus;
 use App\Mail\SigningInvitation;
 use App\Models\Envelope;
-use App\Models\MailDelivery;
 use App\Models\Signer;
 use App\Models\Team;
 use App\Services\OutboundMailDelivery;
@@ -24,32 +23,26 @@ final readonly class RotateSigningInvitation
 {
     public function __construct(private OutboundMailDelivery $mailDelivery) {}
 
-    public function handle(Team $team, User $sender, int $signerId): bool
+    public function handle(Team $team, User $sender, int $envelopeId, int $signerId): bool
     {
         if (! $team->hasMember($sender)) {
             throw new DomainException('The sender must belong to the envelope team.');
         }
 
-        [$envelope, $signer, $token, $delivery] = DB::transaction(function () use ($team, $sender, $signerId): array {
-            $candidate = Signer::query()->findOrFail($signerId);
+        [$envelope, $signer, $token, $delivery] = DB::transaction(function () use ($team, $sender, $envelopeId, $signerId): array {
             $envelope = Envelope::query()
                 ->forTeam($team)
                 ->where('sender_id', $sender->getKey())
                 ->lockForUpdate()
-                ->findOrFail($candidate->envelope_id);
-            $signer = Signer::query()->lockForUpdate()->findOrFail($signerId);
-            $latest = MailDelivery::query()
-                ->where('signer_id', $signer->getKey())
-                ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
-                ->latest('generation')
+                ->findOrFail($envelopeId);
+            $signer = Signer::query()
+                ->where('envelope_id', $envelope->getKey())
                 ->lockForUpdate()
-                ->first();
-            if ($latest !== null) {
-                $latest = $this->mailDelivery->markStaleClaimUnknown($latest);
-            }
+                ->findOrFail($signerId);
 
-            if ($envelope->status !== EnvelopeStatus::Sent || $latest?->status !== MailDeliveryStatus::Unknown) {
-                throw new DomainException('Only an invitation with unknown delivery may be rotated.');
+            if ($envelope->status !== EnvelopeStatus::Sent
+                || in_array($signer->status, [SignerStatus::Signed, SignerStatus::Declined], true)) {
+                throw new DomainException('Only a non-terminal signer on a sent envelope may receive a new link.');
             }
 
             $token = bin2hex(random_bytes(32));
