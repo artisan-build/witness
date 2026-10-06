@@ -24,19 +24,27 @@
         </div>
         <div class="signing-pdf-stage" data-pdf-stage>
             <canvas data-testid="signer-pdf-canvas"></canvas>
-            <div class="signing-field-overlays" data-testid="signer-field-overlays" aria-label="Your fields on this page">
+            <svg class="signing-field-overlays"
+                 data-testid="signer-field-overlays"
+                 viewBox="0 0 1 1"
+                 preserveAspectRatio="none"
+                 aria-label="Your fields on this page">
                 @foreach ($signer->fields->sortBy(['page', 'id']) as $field)
-                    <button type="button"
-                            class="signing-field-overlay"
-                            data-testid="signer-field-overlay"
-                            data-field-id="{{ $field->getKey() }}"
-                            data-field-page="{{ $field->page }}"
-                            aria-label="{{ str($field->type->value)->replace('_', ' ')->title() }} field on page {{ $field->page }}"
-                            style="left: {{ (float) $field->position_x * 100 }}%; top: {{ (float) $field->position_y * 100 }}%; width: {{ (float) $field->width * 100 }}%; height: {{ (float) $field->height * 100 }}%;">
-                        <span>{{ str($field->type->value)->replace('_', ' ')->title() }}</span>
-                    </button>
+                    <g class="signing-field-overlay"
+                       data-testid="signer-field-overlay"
+                       data-field-id="{{ $field->getKey() }}"
+                       data-field-page="{{ $field->page }}"
+                       role="button"
+                       tabindex="0"
+                       aria-label="{{ str($field->type->value)->replace('_', ' ')->title() }} field on page {{ $field->page }}">
+                        <rect x="{{ (float) $field->position_x }}"
+                              y="{{ (float) $field->position_y }}"
+                              width="{{ (float) $field->width }}"
+                              height="{{ (float) $field->height }}"
+                              vector-effect="non-scaling-stroke" />
+                    </g>
                 @endforeach
-            </div>
+            </svg>
         </div>
     </section>
 

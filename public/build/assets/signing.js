@@ -10,7 +10,6 @@ if (viewer) {
     const count = viewer.querySelector('[data-page-count]');
     const previous = viewer.querySelector('[data-page-prev]');
     const next = viewer.querySelector('[data-page-next]');
-    const stage = viewer.querySelector('[data-pdf-stage]');
     const overlays = [...viewer.querySelectorAll('[data-testid="signer-field-overlay"]')];
     const fieldsets = [...document.querySelectorAll('[data-testid="signer-field"]')];
     let pageNumber = 1;
@@ -19,7 +18,7 @@ if (viewer) {
     const syncOverlays = () => {
         overlays.forEach((overlay) => {
             const visible = Number(overlay.dataset.fieldPage) === pageNumber;
-            overlay.hidden = !visible;
+            overlay.classList.toggle('is-page-hidden', !visible);
             overlay.classList.toggle('is-focused', visible && overlay.dataset.fieldId === focusedFieldId);
         });
     };
@@ -36,8 +35,6 @@ if (viewer) {
             const viewport = pageProxy.getViewport({ scale: 1.6 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
-            stage.style.width = `${viewport.width}px`;
-            stage.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
             await pageProxy.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
             current.textContent = String(pageNumber);
             previous.disabled = pageNumber === 1;
@@ -54,10 +51,16 @@ if (viewer) {
             await render();
         });
         overlays.forEach((overlay) => {
-            overlay.addEventListener('click', () => {
+            const focusField = () => {
                 const fieldset = document.querySelector(`#signer-field-${overlay.dataset.fieldId}`);
                 const focusTarget = fieldset?.querySelector('input, textarea, button') ?? fieldset;
                 focusTarget?.focus();
+            };
+            overlay.addEventListener('click', focusField);
+            overlay.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                focusField();
             });
         });
         fieldsets.forEach((fieldset) => {
