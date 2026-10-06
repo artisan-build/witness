@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\OutboundMailDelivery;
 use App\Services\PdfDocumentService;
 use ArtisanBuild\BuiltForCloud\SystemAuthoritySchedule;
 use Illuminate\Foundation\Inspiring;
@@ -10,7 +11,10 @@ Artisan::command('inspire', function (): void {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-resolve(SystemAuthoritySchedule::class)->call(Schedule::getFacadeRoot(), fn () => resolve(PdfDocumentService::class)->retryPending())
+resolve(SystemAuthoritySchedule::class)->call(Schedule::getFacadeRoot(), function (): void {
+    resolve(PdfDocumentService::class)->retryPending();
+    resolve(OutboundMailDelivery::class)->reconcileStaleClaims();
+})
     ->name('witness:cleanup-private-files')
     ->everyMinute()
     ->withoutOverlapping();

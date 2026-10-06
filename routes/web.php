@@ -4,12 +4,26 @@ declare(strict_types=1);
 
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EnvelopeController;
+use App\Http\Controllers\SigningController;
 use App\Http\Controllers\TeamSelectionController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Middleware\AddSigningSecurityHeaders;
 use App\Http\Middleware\EnsureSelectedTeam;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Illuminate\Support\Facades\Route;
+
+Route::middleware([AddSigningSecurityHeaders::class, 'throttle:signing-public'])->group(function (): void {
+    Route::get('/sign', [SigningController::class, 'show'])->name('sign.show');
+    Route::post('/sign/code', [SigningController::class, 'verify'])->name('sign.verify');
+    Route::post('/sign/code/rotate', [SigningController::class, 'rotateCode'])->name('sign.code.rotate');
+    Route::post('/sign/consent', [SigningController::class, 'consent'])->name('sign.consent');
+    Route::get('/sign/document', [SigningController::class, 'document'])->name('sign.document');
+    Route::post('/sign/fields', [SigningController::class, 'saveFields'])->name('sign.fields');
+    Route::post('/sign/complete', [SigningController::class, 'sign'])->name('sign.complete');
+    Route::post('/sign/decline', [SigningController::class, 'decline'])->name('sign.decline');
+    Route::get('/sign/{token}', [SigningController::class, 'open'])->name('sign.open');
+});
 
 Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])->group(function (): void {
     Route::get('/teams/select', [TeamSelectionController::class, 'index'])->name('sender.teams.select');
@@ -25,6 +39,7 @@ Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])-
         Route::put('/envelopes/{envelope}/signers', [EnvelopeController::class, 'updateSigners'])->name('sender.envelopes.signers');
         Route::put('/envelopes/{envelope}/fields', [EnvelopeController::class, 'updateFields'])->name('sender.envelopes.fields');
         Route::post('/envelopes/{envelope}/send', [EnvelopeController::class, 'send'])->name('sender.envelopes.send');
+        Route::post('/envelopes/{envelope}/signers/{signer}/resend-link', [EnvelopeController::class, 'resendLink'])->name('sender.envelopes.signers.resend-link');
         Route::post('/envelopes/{envelope}/template', [EnvelopeController::class, 'saveAsTemplate'])->name('sender.envelopes.template');
         Route::get('/envelopes/{envelope}/document', [DocumentController::class, 'envelope'])->name('sender.envelopes.document.show');
 

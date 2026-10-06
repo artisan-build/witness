@@ -73,7 +73,7 @@ it('roots genesis in the document hash frozen at send', function (): void {
     $events = $envelope->auditEvents()->get();
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
-    expect($events)->toHaveCount(2)
+    expect($events)->toHaveCount(3)
         ->and($events->first()->occurred_at->equalTo($envelope->created_at))->toBeTrue()
         ->and($result->valid)->toBeTrue();
 });
@@ -270,8 +270,8 @@ it('reloads the first uncommitted event before a normal send records the second'
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
 
     expect($stateReloads)->toBeGreaterThanOrEqual(2)
-        ->and(VerbEvent::query()->count())->toBe(2)
-        ->and(AuditEvent::query()->count())->toBe(2);
+        ->and(VerbEvent::query()->count())->toBe(3)
+        ->and(AuditEvent::query()->count())->toBe(3);
 });
 
 it('retries a send in the same process after its outer transaction rolls back', function (): void {
@@ -280,8 +280,8 @@ it('retries a send in the same process after its outer transaction rolls back', 
     DB::beginTransaction();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
 
-    expect(VerbEvent::query()->count())->toBe(2)
-        ->and(AuditEvent::query()->count())->toBe(2);
+    expect(VerbEvent::query()->count())->toBe(3)
+        ->and(AuditEvent::query()->count())->toBe(3);
 
     DB::rollBack();
 
@@ -292,8 +292,8 @@ it('retries a send in the same process after its outer transaction rolls back', 
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
 
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
-        ->and(VerbEvent::query()->count())->toBe(2)
-        ->and(AuditEvent::query()->count())->toBe(2);
+        ->and(VerbEvent::query()->count())->toBe(3)
+        ->and(AuditEvent::query()->count())->toBe(3);
 });
 
 it('rejects forwarded audit update and unscoped delete paths in PostgreSQL', function (): void {
@@ -315,21 +315,21 @@ it('rejects forwarded audit update and unscoped delete paths in PostgreSQL', fun
             AuditEvent::query()->whereKey($event)->toBase()->delete();
         }))->toThrow(QueryException::class, 'envelope purge');
 
-    expect(AuditEvent::query()->count())->toBe(2);
+    expect(AuditEvent::query()->count())->toBe(3);
 });
 
 it('detects empty and tail-truncated chains against envelope anchors', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     DB::statement("SELECT set_config('witness.purge_envelope', ?, true)", [(string) $envelope->getKey()]);
-    DB::table('audit_events')->where('envelope_id', $envelope->getKey())->where('sequence', 2)->delete();
+    DB::table('audit_events')->where('envelope_id', $envelope->getKey())->where('sequence', 3)->delete();
 
     $tailResult = resolve(AuditChainVerifier::class)->verify($envelope);
     DB::table('audit_events')->where('envelope_id', $envelope->getKey())->delete();
     $emptyResult = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($tailResult->valid)->toBeFalse()
-        ->and($tailResult->reason)->toContain('Expected 2 audit events')
+        ->and($tailResult->reason)->toContain('Expected 3 audit events')
         ->and($emptyResult->valid)->toBeFalse()
         ->and($emptyResult->reason)->toContain('no audit chain');
 });

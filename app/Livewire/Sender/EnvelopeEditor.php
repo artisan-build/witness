@@ -29,7 +29,9 @@ final class EnvelopeEditor extends Component
             ->where('sender_id', auth()->id())
             ->with([
                 'document',
-                'signers' => fn ($query) => $query->orderBy('position'),
+                'signers' => fn ($query) => $query
+                    ->with(['mailDeliveries' => fn ($query) => $query->orderBy('generation')])
+                    ->orderBy('position'),
                 'fields',
                 'auditEvents',
             ])

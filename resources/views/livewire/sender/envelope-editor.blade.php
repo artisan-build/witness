@@ -65,7 +65,26 @@
                 @else
                     <ol class="witness-summary-list">
                         @foreach ($envelope->signers as $signer)
-                            <li><strong>{{ $signer->name }}</strong><span>{{ $signer->email }}</span></li>
+                            <li>
+                                <strong>{{ $signer->name }}</strong>
+                                <span>{{ $signer->email }}</span>
+                                <span>Status: {{ $signer->status->value }}</span>
+                                @if ($signer->status === \App\Enums\SignerStatus::Declined)
+                                    @php
+                                        $declineDelivery = $signer->mailDeliveries
+                                            ->where('purpose', \App\Enums\MailDeliveryPurpose::DeclineNotification)
+                                            ->sortByDesc('generation')
+                                            ->first();
+                                    @endphp
+                                    <span>Decline notification: {{ $declineDelivery?->status === \App\Enums\MailDeliveryStatus::Sent ? 'sent' : 'unknown' }}</span>
+                                @elseif ($envelope->status === \App\Enums\EnvelopeStatus::Sent
+                                    && ! in_array($signer->status, [\App\Enums\SignerStatus::Signed, \App\Enums\SignerStatus::Declined], true))
+                                    <form method="POST" action="{{ route('sender.envelopes.signers.resend-link', [$envelope, $signer]) }}">
+                                        @csrf
+                                        <flux:button type="submit" size="sm">Resend link</flux:button>
+                                    </form>
+                                @endif
+                            </li>
                         @endforeach
                     </ol>
                 @endif

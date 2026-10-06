@@ -29,11 +29,16 @@ class Signer extends Model
         'status',
         'link_token_hash',
         'otp_hash',
+        'otp_sent_at',
         'otp_expires_at',
         'otp_attempts',
         'otp_locked_at',
+        'otp_verified_at',
         'viewed_at',
+        'consented_at',
         'signed_at',
+        'declined_at',
+        'decline_reason',
     ];
 
     protected static function booted(): void
@@ -63,6 +68,12 @@ class Signer extends Model
         return $this->hasMany(Field::class);
     }
 
+    /** @return HasMany<MailDelivery, $this> */
+    public function mailDeliveries(): HasMany
+    {
+        return $this->hasMany(MailDelivery::class);
+    }
+
     private function assertDraftEnvelope(string $message): void
     {
         $isDraft = Envelope::query()
@@ -80,11 +91,16 @@ class Signer extends Model
         return [
             'status' => SignerStatus::class,
             'position' => 'integer',
+            'otp_sent_at' => 'immutable_datetime',
             'otp_expires_at' => 'immutable_datetime',
             'otp_attempts' => 'integer',
             'otp_locked_at' => 'immutable_datetime',
+            'otp_verified_at' => 'immutable_datetime',
             'viewed_at' => 'immutable_datetime',
+            'consented_at' => 'immutable_datetime',
             'signed_at' => 'immutable_datetime',
+            'declined_at' => 'immutable_datetime',
+            'decline_reason' => 'encrypted',
         ];
     }
 }

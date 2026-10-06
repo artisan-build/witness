@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\CreateDraftEnvelope;
+use App\Actions\RotateSigningInvitation;
 use App\Actions\SendEnvelope;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
@@ -31,6 +32,7 @@ final readonly class EnvelopeController
         private PdfDocumentService $pdfs,
         private CreateDraftEnvelope $createDraft,
         private SendEnvelope $sendEnvelope,
+        private RotateSigningInvitation $rotateSigningInvitation,
     ) {}
 
     public function index(Request $request): View
@@ -250,6 +252,24 @@ final readonly class EnvelopeController
         }
 
         return back()->with('status', 'Envelope sent and frozen.');
+    }
+
+    public function resendLink(Request $request, int $envelope, int $signer): RedirectResponse
+    {
+        $user = $this->user($request);
+
+        try {
+            $this->rotateSigningInvitation->handle(
+                $this->selectedTeam->get(),
+                $user,
+                $envelope,
+                $signer,
+            );
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['resend' => $exception->getMessage()]);
+        }
+
+        return back()->with('status', 'A new signing link was sent.');
     }
 
     public function saveAsTemplate(Request $request, int $envelope): RedirectResponse
