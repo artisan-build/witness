@@ -1,0 +1,150 @@
+<div>
+    <header class="witness-page-header" data-testid="envelope-editor">
+        <div>
+            <p class="witness-kicker">Envelope #{{ $envelope->getKey() }}</p>
+            <h1>{{ $envelope->title }}</h1>
+            <p>{{ $envelope->document?->original_name }} &middot; {{ $envelope->document?->page_count }} pages</p>
+        </div>
+        <span class="witness-status witness-status-{{ $envelope->status->value }}">{{ ucfirst($envelope->status->value) }}</span>
+    </header>
+
+    <div class="witness-editor-grid">
+        <div class="witness-editor-main">
+            <section class="witness-panel" data-testid="envelope-details">
+                <p class="witness-kicker">Step 1</p>
+                <h2>Document and details</h2>
+                <form method="POST" action="{{ route('sender.envelopes.update', $envelope) }}" class="witness-stack">
+                    @csrf
+                    @method('PUT')
+                    <flux:input name="title" label="Title" :value="old('title', $envelope->title)" required :disabled="!$envelope->status->isDraft()" />
+                    <flux:textarea name="message" label="Message" rows="4" :disabled="!$envelope->status->isDraft()">{{ old('message', $envelope->message) }}</flux:textarea>
+                    <flux:input type="date" name="expires_at" label="Expires on" :value="old('expires_at', $envelope->expires_at?->format('Y-m-d'))" :disabled="!$envelope->status->isDraft()" />
+                    @if ($envelope->status->isDraft())
+                        <flux:button type="submit" variant="primary">Save details</flux:button>
+                    @endif
+                </form>
+                @if ($envelope->status->isDraft())
+                    <form method="POST" action="{{ route('sender.envelopes.document', $envelope) }}" enctype="multipart/form-data" class="witness-inline-form">
+                        @csrf
+                        @method('PUT')
+                        <flux:input type="file" name="document" label="Replace PDF" accept="application/pdf,.pdf" required />
+                        <flux:button type="submit">Replace</flux:button>
+                    </form>
+                @endif
+            </section>
+
+            <section class="witness-panel" data-testid="signer-editor">
+                <p class="witness-kicker">Step 2</p>
+                <h2>Signers</h2>
+                @if ($envelope->status->isDraft())
+                    <form method="POST" action="{{ route('sender.envelopes.signers', $envelope) }}" class="witness-stack"
+                          data-repeater="signers"
+                          x-data="witnessRepeater({{ Js::from($envelope->signers->map(fn ($signer) => ['id' => $signer->getKey(), 'name' => $signer->name, 'email' => $signer->email, 'role_label' => $signer->role_label])->values()) }}, {{ Js::from(['id' => null, 'name' => '', 'email' => '', 'role_label' => '']) }})">
+                        @csrf
+                        @method('PUT')
+                        <div data-repeater-list>
+                            <template x-for="(row, index) in rows" :key="row._key">
+                                <div class="witness-repeater-row" data-repeater-row>
+                                    <input type="hidden" :name="`signers[${index}][id]`" x-model="row.id">
+                                    <flux:input label="Name" x-bind:name="`signers[${index}][name]`" x-model="row.name" required />
+                                    <flux:input type="email" label="Email" x-bind:name="`signers[${index}][email]`" x-model="row.email" required />
+                                    <flux:input label="Role" x-bind:name="`signers[${index}][role_label]`" x-model="row.role_label" placeholder="Client" />
+                                    <div class="witness-row-actions">
+                                        <flux:button type="button" size="sm" x-on:click="move(index, -1)" aria-label="Move signer up">Up</flux:button>
+                                        <flux:button type="button" size="sm" x-on:click="move(index, 1)" aria-label="Move signer down">Down</flux:button>
+                                        <flux:button type="button" size="sm" variant="danger" x-on:click="remove(index)">Remove</flux:button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="witness-actions">
+                            <flux:button type="button" x-on:click="add()">Add signer</flux:button>
+                            <flux:button type="submit" variant="primary">Save signers</flux:button>
+                        </div>
+                    </form>
+                @else
+                    <ol class="witness-summary-list">
+                        @foreach ($envelope->signers as $signer)
+                            <li><strong>{{ $signer->name }}</strong><span>{{ $signer->email }}</span></li>
+                        @endforeach
+                    </ol>
+                @endif
+            </section>
+
+            <section class="witness-panel" data-testid="field-placement">
+                <p class="witness-kicker">Step 3</p>
+                <h2>Place fields</h2>
+                @if ($envelope->status->isDraft() && $envelope->signers->isNotEmpty())
+                    <form method="POST" action="{{ route('sender.envelopes.fields', $envelope) }}"
+                          data-placement-root
+                          data-pdf-url="{{ route('sender.envelopes.document.show', $envelope) }}"
+                          x-data="witnessPlacement({{ Js::from(route('sender.envelopes.document.show', $envelope)) }})">
+                        @csrf
+                        @method('PUT')
+                        <input type="hidden" name="fields_json" data-fields-input :value="serializedFields">
+                        <script type="application/json" data-placement-data>@json($placementData)</script>
+                        <div class="witness-palette" aria-label="Field types">
+                            @foreach ($fieldTypes as $type)
+                                <flux:button type="button" size="sm" data-field-type="{{ $type->value }}" x-on:click="addField('{{ $type->value }}')">
+                                    {{ str($type->value)->replace('_', ' ')->title() }}
+                                </flux:button>
+                            @endforeach
+                        </div>
+                        <div class="witness-page-controls">
+                            <flux:button type="button" size="sm" data-page-prev x-on:click="previousPage()" x-bind:disabled="currentPage <= 1">Previous</flux:button>
+                            <span>Page <strong data-page-number x-text="currentPage">1</strong> of <span data-page-count x-text="pageCount">...</span></span>
+                            <flux:button type="button" size="sm" data-page-next x-on:click="nextPage()" x-bind:disabled="currentPage >= pageCount">Next</flux:button>
+                        </div>
+                        <div class="witness-pdf-stage" data-pdf-stage x-ref="stage">
+                            <canvas data-testid="pdf-page-canvas" x-ref="canvas"></canvas>
+                            <div class="witness-field-layer" data-field-layer x-ref="layer" x-bind:class="{ 'is-loading': loading }"
+                                 x-on:pointermove.window="moveField($event)" x-on:pointerup.window="stopField()">
+                                <template x-for="field in visibleFields" :key="field._key">
+                                    <div class="witness-field" data-testid="placed-field" x-bind:style="fieldStyle(field)"
+                                         x-on:pointerdown="startField($event, field)" x-init="observeField($el, field)">
+                                        <label x-text="field.type.replace('_', ' ')"></label>
+                                        <select x-model.number="field.assignee_id" x-on:change="persist()" x-on:pointerdown.stop x-bind:aria-label="`Assign ${field.type}`">
+                                            <template x-for="assignee in assignees" :key="assignee.id">
+                                                <option x-bind:value="Number(assignee.id)" x-text="assignee.name"></option>
+                                            </template>
+                                        </select>
+                                        <button type="button" aria-label="Remove field" x-on:pointerdown.stop x-on:click="removeField(field._key)">&times;</button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                        <flux:button type="submit" variant="primary" data-testid="save-fields">Save placements</flux:button>
+                    </form>
+                @elseif ($envelope->signers->isEmpty())
+                    <p>Add a signer before placing fields.</p>
+                @else
+                    <p>{{ $envelope->fields->count() }} field placements are frozen.</p>
+                @endif
+            </section>
+        </div>
+
+        <aside class="witness-panel witness-review" data-testid="envelope-review">
+            <p class="witness-kicker">Step 4</p>
+            <h2>Review</h2>
+            <dl>
+                <div><dt>Document</dt><dd>{{ $envelope->document?->original_name }}</dd></div>
+                <div><dt>Signers</dt><dd>{{ $envelope->signers->count() }}</dd></div>
+                <div><dt>Fields</dt><dd>{{ $envelope->fields->count() }}</dd></div>
+                <div><dt>Expiry</dt><dd>{{ $envelope->expires_at?->toFormattedDateString() ?? 'No expiry' }}</dd></div>
+            </dl>
+            @if ($envelope->status->isDraft())
+                <form method="POST" action="{{ route('sender.envelopes.send', $envelope) }}">
+                    @csrf
+                    <flux:button type="submit" variant="primary" class="witness-button-full" data-testid="send-envelope">Send and freeze</flux:button>
+                </form>
+                <form method="POST" action="{{ route('sender.envelopes.template', $envelope) }}" class="witness-stack">
+                    @csrf
+                    <flux:input name="name" label="Template name" required />
+                    <flux:button type="submit">Save as template</flux:button>
+                </form>
+            @else
+                <p class="witness-frozen">Sent {{ $envelope->sent_at?->diffForHumans() }}. Document and fields are locked.</p>
+            @endif
+        </aside>
+    </div>
+</div>

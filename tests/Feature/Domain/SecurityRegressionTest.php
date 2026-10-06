@@ -43,6 +43,19 @@ function createSecurityEnvelope(string $contents = 'security document'): array
         ipAddress: '192.0.2.10',
         userAgent: 'Witness security test',
     );
+    $signer = $envelope->signers()->create([
+        'name' => 'Security signer',
+        'email' => 'security-'.$envelope->getKey().'@example.test',
+    ]);
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
 
     return [$team, $sender, $envelope];
 }

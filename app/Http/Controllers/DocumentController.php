@@ -32,6 +32,7 @@ final readonly class DocumentController
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'inline; filename="'.str_replace('"', '', $document->original_name).'"',
             'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
         ]);
     }
 
@@ -49,6 +50,7 @@ final readonly class DocumentController
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'inline; filename="'.str_replace('"', '', $record->original_name).'"',
             'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; sandbox",
         ]);
     }
 

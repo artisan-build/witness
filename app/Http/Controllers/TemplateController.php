@@ -7,7 +7,6 @@ namespace App\Http\Controllers;
 use App\Actions\CreateDraftEnvelope;
 use App\Enums\FieldType;
 use App\Models\Template;
-use App\Models\TemplateRole;
 use App\Services\PdfDocumentService;
 use App\Support\SelectedTeam;
 use ArtisanBuild\BuiltForCloud\User;
@@ -69,7 +68,7 @@ final readonly class TemplateController
             $template->sender_id = $user->getKey();
             $template->save();
         } catch (Throwable $exception) {
-            $this->pdfs->delete($path);
+            $this->pdfs->deleteOrQueue($path);
             throw $exception;
         }
 
@@ -78,40 +77,22 @@ final readonly class TemplateController
 
     public function edit(Request $request, int $template): View
     {
-        $record = $this->findTemplate($this->user($request), $template, ['roles', 'fields']);
+        $record = $this->findTemplate($this->user($request), $template);
 
-        $placementData = [
-            'assignees' => $record->roles->map(fn (TemplateRole $role): array => [
-                'id' => $role->getKey(),
-                'name' => $role->label,
-            ])->values(),
-            'fields' => $record->fields->map(fn ($field): array => [
-                'assignee_id' => $field->template_role_id,
-                'page' => $field->page,
-                'type' => $field->type->value,
-                'required' => $field->required,
-                'position_x' => (float) $field->position_x,
-                'position_y' => (float) $field->position_y,
-                'width' => (float) $field->width,
-                'height' => (float) $field->height,
-            ])->values(),
-        ];
-
-        return view('sender.templates.edit', [
-            'template' => $record,
-            'fieldTypes' => FieldType::cases(),
-            'placementData' => $placementData,
-        ]);
+        return view('sender.templates.edit', ['template' => $record]);
     }
 
     public function update(Request $request, int $template): RedirectResponse
     {
-        $record = $this->findTemplate($this->user($request), $template);
-        $record->update($request->validate([
+        $this->findTemplate($this->user($request), $template);
+        $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'title' => ['required', 'string', 'max:255'],
             'message' => ['nullable', 'string', 'max:5000'],
-        ]));
+        ]);
+        DB::transaction(function () use ($template, $data): void {
+            $this->lockTemplate($template)->update($data);
+        });
 
         return back()->with('status', 'Template details saved.');
     }
@@ -122,10 +103,11 @@ final readonly class TemplateController
         $data = $request->validate(['document' => ['required', 'file', 'max:20480']]);
         $pdf = $this->pdfs->inspect($data['document']);
         $path = $this->pdfs->store($pdf, (int) $this->selectedTeam->get()->getKey());
-        $oldPath = $record->storage_path;
 
         try {
-            DB::transaction(function () use ($record, $pdf, $path): void {
+            $oldPath = DB::transaction(function () use ($template, $pdf, $path): string {
+                $record = $this->lockTemplate($template);
+                $displacedPath = $record->storage_path;
                 $record->fields()->delete();
                 $record->update([
                     'original_name' => $pdf['name'],
@@ -134,27 +116,32 @@ final readonly class TemplateController
                     'page_count' => $pdf['pages'],
                     'original_sha256' => $pdf['sha256'],
                 ]);
+
+                return $displacedPath;
             });
         } catch (Throwable $exception) {
-            $this->pdfs->delete($path);
+            $this->pdfs->deleteOrQueue($path);
             throw $exception;
         }
 
-        $this->pdfs->delete($oldPath);
+        $cleaned = $this->pdfs->deleteOrQueue($oldPath);
 
-        return back()->with('status', 'Template PDF replaced. Existing fields were cleared.');
+        return back()->with('status', $cleaned
+            ? 'Template PDF replaced. Existing fields were cleared.'
+            : 'Template PDF replaced. Existing fields were cleared and old-file cleanup is queued.');
     }
 
     public function updateRoles(Request $request, int $template): RedirectResponse
     {
-        $record = $this->findTemplate($this->user($request), $template);
+        $this->findTemplate($this->user($request), $template);
         $data = $request->validate([
             'roles' => ['present', 'array', 'max:50'],
             'roles.*.id' => ['nullable', 'integer'],
             'roles.*.label' => ['required', 'string', 'max:255', 'distinct:ignore_case'],
         ]);
 
-        DB::transaction(function () use ($record, $data): void {
+        DB::transaction(function () use ($template, $data): void {
+            $record = $this->lockTemplate($template);
             $existing = $record->roles()->get()->keyBy('id');
             $submittedIds = array_values(array_filter(array_map(
                 fn (array $role): ?int => isset($role['id']) ? (int) $role['id'] : null,
@@ -184,7 +171,7 @@ final readonly class TemplateController
 
     public function updateFields(Request $request, int $template): RedirectResponse
     {
-        $record = $this->findTemplate($this->user($request), $template, ['roles']);
+        $this->findTemplate($this->user($request), $template);
         $request->validate(['fields_json' => ['required', 'json']]);
         $fields = json_decode($request->string('fields_json')->toString(), true, flags: JSON_THROW_ON_ERROR);
 
@@ -195,7 +182,7 @@ final readonly class TemplateController
         $validated = validator(['fields' => array_values($fields)], [
             'fields' => ['present', 'array', 'max:500'],
             'fields.*.assignee_id' => ['required', 'integer'],
-            'fields.*.page' => ['required', 'integer', 'min:1', 'max:'.$record->page_count],
+            'fields.*.page' => ['required', 'integer', 'min:1'],
             'fields.*.type' => ['required', Rule::enum(FieldType::class)],
             'fields.*.required' => ['required', 'boolean'],
             'fields.*.position_x' => ['required', 'numeric', 'between:0,1'],
@@ -203,17 +190,20 @@ final readonly class TemplateController
             'fields.*.width' => ['required', 'numeric', 'gt:0', 'lte:1'],
             'fields.*.height' => ['required', 'numeric', 'gt:0', 'lte:1'],
         ])->validate()['fields'];
-        $roleIds = $record->roles->modelKeys();
+        DB::transaction(function () use ($template, $validated): void {
+            $record = $this->lockTemplate($template);
+            $record->load('roles');
+            $roleIds = $record->roles->modelKeys();
 
-        foreach ($validated as $field) {
-            if (! in_array((int) $field['assignee_id'], $roleIds, true)
-                || (float) $field['position_x'] + (float) $field['width'] > 1
-                || (float) $field['position_y'] + (float) $field['height'] > 1) {
-                throw ValidationException::withMessages(['fields_json' => 'Every field must use a role and stay within a page.']);
+            foreach ($validated as $field) {
+                if (! in_array((int) $field['assignee_id'], $roleIds, true)
+                    || (int) $field['page'] > $record->page_count
+                    || (float) $field['position_x'] + (float) $field['width'] > 1
+                    || (float) $field['position_y'] + (float) $field['height'] > 1) {
+                    throw ValidationException::withMessages(['fields_json' => 'Every field must use a role and stay within a page.']);
+                }
             }
-        }
 
-        DB::transaction(function () use ($record, $validated): void {
             $record->fields()->delete();
             foreach ($validated as $field) {
                 $role = $record->roles()->findOrFail($field['assignee_id']);
@@ -242,7 +232,7 @@ final readonly class TemplateController
     public function instantiate(Request $request, int $template): RedirectResponse
     {
         $user = $this->user($request);
-        $record = $this->findTemplate($user, $template, ['roles.fields']);
+        $this->findTemplate($user, $template);
         $data = $request->validate([
             'roles' => ['required', 'array'],
             'roles.*.name' => ['required', 'string', 'max:255'],
@@ -251,14 +241,18 @@ final readonly class TemplateController
             'expires_at' => ['nullable', 'date', 'after:today'],
         ]);
 
-        if ($record->roles->isEmpty() || $record->roles->contains(fn ($role) => ! isset($data['roles'][$role->getKey()]))) {
-            throw ValidationException::withMessages(['roles' => 'Map every template role to a signer.']);
-        }
-
-        $path = $this->pdfs->copy($record->storage_path, (int) $this->selectedTeam->get()->getKey());
+        $path = null;
 
         try {
-            $envelope = DB::transaction(function () use ($record, $user, $request, $data, $path) {
+            $envelope = DB::transaction(function () use ($template, $user, $request, $data, &$path) {
+                $record = $this->lockTemplate($template);
+                $record->load('roles.fields');
+
+                if ($record->roles->isEmpty() || $record->roles->contains(fn ($role) => ! isset($data['roles'][$role->getKey()]))) {
+                    throw ValidationException::withMessages(['roles' => 'Map every template role to a signer.']);
+                }
+
+                $path = $this->pdfs->copy($record->storage_path, (int) $this->selectedTeam->get()->getKey());
                 $envelope = $this->createDraft->handle(
                     team: $this->selectedTeam->get(),
                     sender: $user,
@@ -290,7 +284,9 @@ final readonly class TemplateController
                 return $envelope;
             });
         } catch (Throwable $exception) {
-            $this->pdfs->delete($path);
+            if ($path !== null) {
+                $this->pdfs->deleteOrQueue($path);
+            }
             throw $exception;
         }
 
@@ -309,6 +305,15 @@ final readonly class TemplateController
     private function findTemplate(User $user, int $id, array $with = []): Template
     {
         return $this->baseQuery($user)->with($with)->findOrFail($id);
+    }
+
+    private function lockTemplate(int $id): Template
+    {
+        return Template::query()
+            ->forTeam($this->selectedTeam->get())
+            ->where('sender_id', auth()->id())
+            ->lockForUpdate()
+            ->findOrFail($id);
     }
 
     private function user(Request $request): User

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Actions\CreateDraftEnvelope;
 use App\Models\Team;
+use App\Models\Template;
 use Database\Factories\UserFactory;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\PdfFixture;
@@ -28,6 +29,12 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     );
     $signer = $envelope->signers()->create(['name' => '<script>unsafe</script>', 'email' => 'browser@example.test']);
     $signer->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
+    $template = Template::factory()->forOwner($team, $user)->create([
+        'storage_path' => 'documents/'.$team->getKey().'/template-browser-fixture.pdf',
+        'page_count' => 2,
+    ]);
+    $role = $template->roles()->create(['label' => 'Client', 'position' => 0]);
+    $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
 
     $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
         ->get(route('sender.envelopes.edit', $envelope))
@@ -38,12 +45,24 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('data-field-type="signature"', false)
         ->assertSee('0.17')
         ->assertSee('0.23')
-        ->assertSee('&lt;script&gt;unsafe&lt;/script&gt;', false)
+        ->assertSee('\\u003Cscript\\u003Eunsafe', false)
+        ->assertDontSee('<script>unsafe</script>', false)
+        ->assertSee('wire:name="sender.envelope-editor"', false)
+        ->assertSee('x-data="witnessPlacement', false)
+        ->assertSee('data-flux-button', false)
         ->assertSee('build/assets/sender.js');
+
+    $this->get(route('sender.templates.edit', $template))
+        ->assertOk()
+        ->assertSee('wire:name="sender.template-editor"', false)
+        ->assertSee('data-testid="template-field-placement"', false)
+        ->assertSee('x-data="witnessPlacement', false)
+        ->assertSee('data-flux-button', false);
 
     expect(file_exists(public_path('build/assets/pdf.min.mjs')))->toBeTrue()
         ->and(file_exists(public_path('build/assets/pdf.worker.min.mjs')))->toBeTrue()
         ->and(file_exists(public_path('build/assets/pdfjs-LICENSE.txt')))->toBeTrue()
         ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain("import * as pdfjsLib from './pdf.min.mjs'")
-        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain('ResizeObserver');
+        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain('ResizeObserver')
+        ->and(file_get_contents(public_path('build/assets/sender.js')))->toContain("window.Alpine.data('witnessPlacement'");
 });

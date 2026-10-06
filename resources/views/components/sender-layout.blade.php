@@ -2,6 +2,7 @@
 
 @push('head')
     <link rel="stylesheet" href="{{ asset('build/assets/sender.css') }}">
+    @fluxAppearance
 @endpush
 
 <x-bfc-layout :title="$title.' - Witness'">

@@ -10,12 +10,15 @@ use App\Enums\EnvelopeStatus;
 use App\Events\EnvelopeLifecycleRecorded;
 use App\Models\Envelope;
 use App\Models\Team;
+use App\Services\EnvelopeSendValidator;
 use ArtisanBuild\BuiltForCloud\User;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 
 final class SendEnvelope
 {
+    public function __construct(private readonly EnvelopeSendValidator $validator) {}
+
     public function handle(
         Team $team,
         User $sender,
@@ -31,7 +34,6 @@ final class SendEnvelope
             $envelope = Envelope::query()
                 ->forTeam($team)
                 ->where('sender_id', $sender->getKey())
-                ->with('document')
                 ->lockForUpdate()
                 ->findOrFail($envelopeId);
 
@@ -39,9 +41,8 @@ final class SendEnvelope
                 throw new DomainException('Only a draft envelope can be sent.');
             }
 
-            if ($envelope->document === null) {
-                throw new DomainException('An envelope requires an original document before send.');
-            }
+            $envelope->load(['document', 'signers.fields', 'fields']);
+            $this->validator->assertSendable($envelope);
 
             DB::statement("SET LOCAL witness.envelope_transition = 'on'");
             DB::table('envelopes')->where('id', $envelope->getKey())->update([

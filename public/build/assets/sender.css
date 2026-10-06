@@ -1,4 +1,5 @@
 :root{--w-ink:#261d18;--w-paper:#fffaf2;--w-card:#fffefb;--w-rust:#a64525;--w-rust-dark:#74301d;--w-line:#ddcdbb;--w-muted:#75685e;--w-sage:#54705e;--w-shadow:0 18px 48px rgba(77,52,35,.09)}
+[x-cloak]{display:none!important}
 .witness-shell{max-width:1180px;margin:0 auto;padding:0 24px 72px;color:var(--w-ink)}
 .witness-nav{display:flex;align-items:center;gap:26px;padding:17px 0 24px;border-bottom:1px solid var(--w-line)}
 .witness-brand{font-family:Georgia,serif;font-size:25px;font-weight:700;color:var(--w-ink);text-decoration:none}.witness-nav-links{display:flex;align-items:center;gap:18px}.witness-nav-links a,.witness-team{color:var(--w-muted);font-weight:650;text-decoration:none}.witness-team{margin-left:auto;padding:8px 12px;border:1px solid var(--w-line);border-radius:999px}

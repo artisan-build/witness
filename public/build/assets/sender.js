@@ -2,136 +2,195 @@ import * as pdfjsLib from './pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.min.mjs', import.meta.url).toString();
 
-document.querySelectorAll('[data-repeater]').forEach((repeater) => {
-    const list = repeater.querySelector('[data-repeater-list]');
-    const template = repeater.querySelector('[data-repeater-template]');
-    const prefix = repeater.dataset.repeater;
+const key = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 
-    const rename = () => list.querySelectorAll('[data-repeater-row]').forEach((row, index) => {
-        row.querySelectorAll('[data-name]').forEach((input) => input.name = `${prefix}[${index}][${input.dataset.name}]`);
-    });
-    const wire = (row) => {
-        row.querySelector('[data-remove-row]').addEventListener('click', () => { row.remove(); rename(); });
-        row.querySelector('[data-move-up]').addEventListener('click', () => { if (row.previousElementSibling) list.insertBefore(row, row.previousElementSibling); rename(); });
-        row.querySelector('[data-move-down]').addEventListener('click', () => { if (row.nextElementSibling) list.insertBefore(row.nextElementSibling, row); rename(); });
-    };
+const register = () => {
+    window.Alpine.data('witnessRepeater', (initialRows, emptyRow) => ({
+        rows: initialRows.map((row) => ({ ...row, _key: key() })),
 
-    list.querySelectorAll('[data-repeater-row]').forEach(wire);
-    repeater.querySelector('[data-add-row]').addEventListener('click', () => {
-        const row = template.content.firstElementChild.cloneNode(true);
-        list.append(row);
-        wire(row);
-        rename();
-        row.querySelector('input:not([type="hidden"])')?.focus();
-    });
-    rename();
-});
+        add() {
+            this.rows.push({ ...emptyRow, _key: key() });
+        },
 
-document.querySelectorAll('[data-placement-root]').forEach(async (root) => {
-    const data = JSON.parse(root.querySelector('[data-placement-data]').textContent);
-    const input = root.querySelector('[data-fields-input]');
-    const canvas = root.querySelector('canvas');
-    const stage = root.querySelector('[data-pdf-stage]');
-    const layer = root.querySelector('[data-field-layer]');
-    const pageNumber = root.querySelector('[data-page-number]');
-    const pageCount = root.querySelector('[data-page-count]');
-    const colors = ['#a64525', '#366a86', '#54705e', '#8a5d1d', '#71558d', '#326f6a'];
-    let currentPage = 1;
-    let pdf;
-    let fields = data.fields.map((field) => ({ ...field, assignee_id: Number(field.assignee_id), page: Number(field.page) }));
+        remove(index) {
+            this.rows.splice(index, 1);
+        },
 
-    const persist = () => input.value = JSON.stringify(fields.map(({ element, ...field }) => field));
-    const renderFields = () => {
-        layer.replaceChildren();
-        fields.forEach((field, index) => {
-            if (field.page !== currentPage) return;
-            const box = document.createElement('div');
-            box.className = 'witness-field';
-            box.dataset.testid = 'placed-field';
-            box.style.left = `${field.position_x * 100}%`;
-            box.style.top = `${field.position_y * 100}%`;
-            box.style.width = `${field.width * 100}%`;
-            box.style.height = `${field.height * 100}%`;
-            box.style.setProperty('--field-color', colors[data.assignees.findIndex((item) => Number(item.id) === Number(field.assignee_id)) % colors.length]);
-            const label = document.createElement('label');
-            const select = document.createElement('select');
-            const remove = document.createElement('button');
-            label.textContent = field.type.replace('_', ' ');
-            select.setAttribute('aria-label', `Assign ${field.type}`);
-            data.assignees.forEach((item) => {
-                const option = document.createElement('option');
-                option.value = item.id;
-                option.textContent = item.name;
-                option.selected = Number(item.id) === Number(field.assignee_id);
-                select.append(option);
-            });
-            remove.type = 'button';
-            remove.setAttribute('aria-label', 'Remove field');
-            remove.textContent = '×';
-            box.append(label, select, remove);
-            field.element = box;
-            select.addEventListener('change', (event) => { field.assignee_id = Number(event.target.value); renderFields(); persist(); });
-            remove.addEventListener('click', () => { fields.splice(index, 1); renderFields(); persist(); });
-            box.addEventListener('pointerdown', (event) => {
-                if (event.target.closest('select,button')) return;
-                const bounds = layer.getBoundingClientRect();
-                const boxBounds = box.getBoundingClientRect();
-                if (event.clientX > boxBounds.right - 14 && event.clientY > boxBounds.bottom - 14) return;
-                const start = { x: event.clientX, y: event.clientY, left: field.position_x, top: field.position_y };
-                box.setPointerCapture(event.pointerId);
-                const move = (moveEvent) => {
-                    field.position_x = Math.max(0, Math.min(1 - field.width, start.left + (moveEvent.clientX - start.x) / bounds.width));
-                    field.position_y = Math.max(0, Math.min(1 - field.height, start.top + (moveEvent.clientY - start.y) / bounds.height));
-                    box.style.left = `${field.position_x * 100}%`;
-                    box.style.top = `${field.position_y * 100}%`;
-                    persist();
-                };
-                const up = () => { box.removeEventListener('pointermove', move); box.removeEventListener('pointerup', up); };
-                box.addEventListener('pointermove', move);
-                box.addEventListener('pointerup', up);
-            });
-            let resizeReady = false;
-            new ResizeObserver(() => {
-                if (!resizeReady) { resizeReady = true; return; }
-                if (!box.isConnected) return;
-                const bounds = layer.getBoundingClientRect();
-                field.width = Math.max(.01, Math.min(1 - field.position_x, box.offsetWidth / bounds.width));
-                field.height = Math.max(.01, Math.min(1 - field.position_y, box.offsetHeight / bounds.height));
-                persist();
-            }).observe(box);
-            layer.append(box);
-        });
-    };
-    const renderPage = async () => {
-        layer.classList.add('is-loading');
-        const page = await pdf.getPage(currentPage);
-        const viewport = page.getViewport({ scale: 1.6 });
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        await page.render({ canvasContext: context, viewport }).promise;
-        stage.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
-        pageNumber.textContent = currentPage;
-        pageCount.textContent = pdf.numPages;
-        layer.classList.remove('is-loading');
-        renderFields();
-    };
+        move(index, offset) {
+            const destination = index + offset;
 
-    root.querySelectorAll('[data-field-type]').forEach((button) => button.addEventListener('click', () => {
-        fields.push({ assignee_id: Number(data.assignees[0].id), page: currentPage, type: button.dataset.fieldType, required: true, position_x: .1, position_y: .1, width: button.dataset.fieldType === 'checkbox' ? .06 : .26, height: button.dataset.fieldType === 'checkbox' ? .06 : .08 });
-        renderFields();
-        persist();
+            if (destination < 0 || destination >= this.rows.length) return;
+
+            const [row] = this.rows.splice(index, 1);
+            this.rows.splice(destination, 0, row);
+        },
     }));
-    root.querySelector('[data-page-prev]').addEventListener('click', async () => { if (currentPage > 1) { currentPage--; await renderPage(); } });
-    root.querySelector('[data-page-next]').addEventListener('click', async () => { if (currentPage < pdf.numPages) { currentPage++; await renderPage(); } });
-    persist();
-    layer.classList.add('is-loading');
-    try {
-        pdf = await pdfjsLib.getDocument({ url: root.dataset.pdfUrl, isEvalSupported: false }).promise;
-        await renderPage();
-    } catch (error) {
-        layer.classList.remove('is-loading');
-        layer.textContent = 'The PDF preview could not be loaded.';
-        console.error('PDF preview failed', error);
-    }
-});
+
+    window.Alpine.data('witnessPlacement', (pdfUrl) => ({
+        assignees: [],
+        currentPage: 1,
+        drag: null,
+        fields: [],
+        loading: true,
+        pageCount: 1,
+        pdf: null,
+        colors: ['#a64525', '#366a86', '#54705e', '#8a5d1d', '#71558d', '#326f6a'],
+
+        init() {
+            const data = JSON.parse(this.$root.querySelector('[data-placement-data]').textContent);
+            this.assignees = data.assignees;
+            this.fields = data.fields.map((field) => ({
+                ...field,
+                _key: key(),
+                assignee_id: Number(field.assignee_id),
+                page: Number(field.page),
+            }));
+            this.$nextTick(() => this.loadPdf(pdfUrl));
+        },
+
+        get serializedFields() {
+            return JSON.stringify(this.fields.map(({ _key, ...field }) => field));
+        },
+
+        get visibleFields() {
+            return this.fields.filter((field) => field.page === this.currentPage);
+        },
+
+        persist() {
+            this.fields = [...this.fields];
+        },
+
+        addField(type) {
+            if (this.assignees.length === 0) return;
+
+            const checkbox = type === 'checkbox';
+            this.fields.push({
+                _key: key(),
+                assignee_id: Number(this.assignees[0].id),
+                page: this.currentPage,
+                type,
+                required: true,
+                position_x: .1,
+                position_y: .1,
+                width: checkbox ? .06 : .26,
+                height: checkbox ? .06 : .08,
+            });
+        },
+
+        removeField(fieldKey) {
+            this.fields = this.fields.filter((field) => field._key !== fieldKey);
+        },
+
+        fieldStyle(field) {
+            const colorIndex = Math.max(0, this.assignees.findIndex((item) => Number(item.id) === Number(field.assignee_id)));
+
+            return {
+                left: `${field.position_x * 100}%`,
+                top: `${field.position_y * 100}%`,
+                width: `${field.width * 100}%`,
+                height: `${field.height * 100}%`,
+                '--field-color': this.colors[colorIndex % this.colors.length],
+            };
+        },
+
+        startField(event, field) {
+            if (event.target.closest('select,button')) return;
+
+            const box = event.currentTarget;
+            const boxBounds = box.getBoundingClientRect();
+
+            if (event.clientX > boxBounds.right - 14 && event.clientY > boxBounds.bottom - 14) return;
+
+            const bounds = this.$refs.layer.getBoundingClientRect();
+            this.drag = {
+                field,
+                bounds,
+                x: event.clientX,
+                y: event.clientY,
+                left: field.position_x,
+                top: field.position_y,
+            };
+            box.setPointerCapture(event.pointerId);
+        },
+
+        moveField(event) {
+            if (this.drag === null) return;
+
+            const { field, bounds, x, y, left, top } = this.drag;
+            field.position_x = Math.max(0, Math.min(1 - field.width, left + (event.clientX - x) / bounds.width));
+            field.position_y = Math.max(0, Math.min(1 - field.height, top + (event.clientY - y) / bounds.height));
+        },
+
+        stopField() {
+            this.drag = null;
+            this.persist();
+        },
+
+        observeField(element, field) {
+            let ready = false;
+            const observer = new ResizeObserver(() => {
+                if (!ready) {
+                    ready = true;
+                    return;
+                }
+
+                if (!element.isConnected) {
+                    observer.disconnect();
+                    return;
+                }
+
+                const bounds = this.$refs.layer.getBoundingClientRect();
+                if (bounds.width === 0 || bounds.height === 0) return;
+
+                field.width = Math.max(.01, Math.min(1 - field.position_x, element.offsetWidth / bounds.width));
+                field.height = Math.max(.01, Math.min(1 - field.position_y, element.offsetHeight / bounds.height));
+                this.persist();
+            });
+            observer.observe(element);
+        },
+
+        async loadPdf(url) {
+            try {
+                this.pdf = await pdfjsLib.getDocument({ url, isEvalSupported: false }).promise;
+                this.pageCount = this.pdf.numPages;
+                await this.renderPage();
+            } catch (error) {
+                this.loading = false;
+                this.$refs.layer.textContent = 'The PDF preview could not be loaded.';
+                console.error('PDF preview failed', error);
+            }
+        },
+
+        async renderPage() {
+            if (this.pdf === null) return;
+
+            this.loading = true;
+            const page = await this.pdf.getPage(this.currentPage);
+            const viewport = page.getViewport({ scale: 1.6 });
+            const context = this.$refs.canvas.getContext('2d');
+            this.$refs.canvas.width = viewport.width;
+            this.$refs.canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport }).promise;
+            this.$refs.stage.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
+            this.loading = false;
+        },
+
+        async previousPage() {
+            if (this.currentPage <= 1) return;
+            this.currentPage--;
+            await this.renderPage();
+        },
+
+        async nextPage() {
+            if (this.currentPage >= this.pageCount) return;
+            this.currentPage++;
+            await this.renderPage();
+        },
+    }));
+};
+
+if (window.Alpine) {
+    register();
+} else {
+    document.addEventListener('alpine:init', register, { once: true });
+}

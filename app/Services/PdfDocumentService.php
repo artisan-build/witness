@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\PendingFileDeletion;
 use Com\Tecnick\Pdf\Tcpdf;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -83,8 +84,37 @@ final class PdfDocumentService
         return $path;
     }
 
-    public function delete(string $path): void
+    public function deleteOrQueue(string $path): bool
     {
-        Storage::delete($path);
+        return $this->deleteFromDiskOrQueue((string) config('filesystems.default'), $path);
+    }
+
+    private function deleteFromDiskOrQueue(string $disk, string $path): bool
+    {
+        $pending = PendingFileDeletion::query()->firstOrCreate(['disk' => $disk, 'path' => $path]);
+
+        try {
+            $deleted = Storage::disk($disk)->delete($path);
+        } catch (Throwable) {
+            $deleted = false;
+        }
+
+        if ($deleted) {
+            $pending->delete();
+
+            return true;
+        }
+
+        $pending->increment('attempts');
+        $pending->update(['last_attempted_at' => now()]);
+
+        return false;
+    }
+
+    public function retryPending(): void
+    {
+        PendingFileDeletion::query()->orderBy('id')->eachById(function (PendingFileDeletion $pending): void {
+            $this->deleteFromDiskOrQueue($pending->disk, $pending->path);
+        }, 100);
     }
 }

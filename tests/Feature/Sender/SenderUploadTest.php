@@ -37,16 +37,16 @@ it('rejects spoofed encrypted empty too-large and over-page-limit uploads withou
     $this->actingAsVersioned($user)->from(route('sender.envelopes.create'))->post(route('sender.envelopes.store'), [
         'title' => 'Rejected document',
         'document' => $file,
-    ])->assertRedirect(route('sender.envelopes.create'))->assertSessionHasErrors('document');
+    ])->assertRedirect(route('sender.envelopes.create'))->assertSessionHasErrors(['document' => $message]);
 
     expect(Envelope::query()->count())->toBe(0)
         ->and(Storage::disk('local')->allFiles())->toBe([]);
 })->with([
-    'spoofed content' => [fn () => UploadedFile::fake()->createWithContent('spoof.pdf', 'not a pdf'), 'valid PDF'],
-    'encrypted PDF' => [fn () => UploadedFile::fake()->createWithContent('encrypted.pdf', PdfFixture::make(1, true)), 'Encrypted'],
-    'zero pages' => [fn () => UploadedFile::fake()->createWithContent('empty.pdf', PdfFixture::make(0)), 'between 1 and 100'],
-    'over 100 pages' => [fn () => UploadedFile::fake()->createWithContent('long.pdf', PdfFixture::make(101)), 'between 1 and 100'],
-    'over 20 MiB' => [fn () => UploadedFile::fake()->create('large.pdf', 20481, 'application/pdf'), '20 MiB'],
+    'spoofed content' => [fn () => UploadedFile::fake()->createWithContent('spoof.pdf', 'not a pdf'), 'Choose a valid PDF document.'],
+    'encrypted PDF' => [fn () => UploadedFile::fake()->createWithContent('encrypted.pdf', PdfFixture::make(1, true)), 'Encrypted or password-protected PDFs are not supported.'],
+    'zero pages' => [fn () => UploadedFile::fake()->createWithContent('empty.pdf', PdfFixture::make(0)), 'The PDF must contain between 1 and 100 pages.'],
+    'over 100 pages' => [fn () => UploadedFile::fake()->createWithContent('long.pdf', PdfFixture::make(101)), 'The PDF must contain between 1 and 100 pages.'],
+    'over 20 MiB' => [fn () => UploadedFile::fake()->create('large.pdf', 20481, 'application/pdf'), 'The document field must not be greater than 20480 kilobytes.'],
 ]);
 
 it('replaces a draft PDF atomically and removes the previous private object and placements', function (): void {

@@ -9,7 +9,6 @@ use App\Actions\SendEnvelope;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Models\Envelope;
-use App\Models\Signer;
 use App\Models\Template;
 use App\Services\PdfDocumentService;
 use App\Support\SelectedTeam;
@@ -74,7 +73,7 @@ final readonly class EnvelopeController
                 userAgent: $request->userAgent(),
             );
         } catch (Throwable $exception) {
-            $this->pdfs->delete($path);
+            $this->pdfs->deleteOrQueue($path);
             throw $exception;
         }
 
@@ -83,46 +82,22 @@ final readonly class EnvelopeController
 
     public function edit(Request $request, int $envelope): View
     {
-        $record = $this->findEnvelope($this->user($request), $envelope, [
-            'document',
-            'signers' => fn ($query) => $query->orderBy('position'),
-            'fields',
-            'auditEvents',
-        ]);
+        $record = $this->findEnvelope($this->user($request), $envelope);
 
-        $placementData = [
-            'assignees' => $record->signers->map(fn (Signer $signer): array => [
-                'id' => $signer->getKey(),
-                'name' => $signer->name,
-            ])->values(),
-            'fields' => $record->fields->map(fn ($field): array => [
-                'assignee_id' => $field->signer_id,
-                'page' => $field->page,
-                'type' => $field->type->value,
-                'required' => $field->required,
-                'position_x' => (float) $field->position_x,
-                'position_y' => (float) $field->position_y,
-                'width' => (float) $field->width,
-                'height' => (float) $field->height,
-            ])->values(),
-        ];
-
-        return view('sender.envelopes.edit', [
-            'envelope' => $record,
-            'fieldTypes' => FieldType::cases(),
-            'placementData' => $placementData,
-        ]);
+        return view('sender.envelopes.edit', ['envelope' => $record]);
     }
 
     public function update(Request $request, int $envelope): RedirectResponse
     {
-        $record = $this->findDraft($this->user($request), $envelope);
+        $this->findDraft($this->user($request), $envelope);
         $data = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'message' => ['nullable', 'string', 'max:5000'],
             'expires_at' => ['nullable', 'date', 'after:today'],
         ]);
-        $record->update($data);
+        DB::transaction(function () use ($envelope, $data): void {
+            $this->lockDraft($envelope)->update($data);
+        });
 
         return back()->with('status', 'Envelope details saved.');
     }
@@ -130,33 +105,38 @@ final readonly class EnvelopeController
     public function replaceDocument(Request $request, int $envelope): RedirectResponse
     {
         $record = $this->findDraft($this->user($request), $envelope, ['document']);
+        abort_if($record->document === null, 409, 'The draft has no document to replace.');
         $data = $request->validate(['document' => ['required', 'file', 'max:20480']]);
         $pdf = $this->pdfs->inspect($data['document']);
         $newPath = $this->pdfs->store($pdf, (int) $this->selectedTeam->get()->getKey());
-        $oldPath = $record->document?->storage_path;
 
         try {
-            DB::transaction(function () use ($record, $pdf, $newPath): void {
-                $locked = $this->lockDraft((int) $record->getKey());
+            $oldPath = DB::transaction(function () use ($envelope, $pdf, $newPath): string {
+                $locked = $this->lockDraft($envelope);
+                $document = $locked->document()->first();
+                abort_if($document === null, 409, 'The draft has no document to replace.');
+                $displacedPath = $document->storage_path;
                 $locked->fields()->delete();
-                $locked->document()->update([
+                $document->update([
                     'original_name' => $pdf['name'],
                     'storage_path' => $newPath,
                     'size_bytes' => $pdf['size'],
                     'page_count' => $pdf['pages'],
                     'original_sha256' => $pdf['sha256'],
                 ]);
+
+                return $displacedPath;
             });
         } catch (Throwable $exception) {
-            $this->pdfs->delete($newPath);
+            $this->pdfs->deleteOrQueue($newPath);
             throw $exception;
         }
 
-        if ($oldPath !== null) {
-            $this->pdfs->delete($oldPath);
-        }
+        $cleaned = $this->pdfs->deleteOrQueue($oldPath);
 
-        return back()->with('status', 'PDF replaced. Existing fields were cleared.');
+        return back()->with('status', $cleaned
+            ? 'PDF replaced. Existing fields were cleared.'
+            : 'PDF replaced. Existing fields were cleared and old-file cleanup is queued.');
     }
 
     public function updateSigners(Request $request, int $envelope): RedirectResponse
@@ -209,21 +189,24 @@ final readonly class EnvelopeController
 
     public function updateFields(Request $request, int $envelope): RedirectResponse
     {
-        $record = $this->findDraft($this->user($request), $envelope, ['document', 'signers']);
+        $this->findDraft($this->user($request), $envelope);
         $fields = $this->decodeFields($request);
         $validated = validator(['fields' => $fields], $this->fieldRules())->validate()['fields'];
-        $signerIds = $record->signers->modelKeys();
-        $pages = $record->document->page_count;
-
-        foreach ($validated as $field) {
-            if (! in_array((int) $field['assignee_id'], $signerIds, true) || (int) $field['page'] > $pages) {
-                throw ValidationException::withMessages(['fields_json' => 'Every field must use a signer and page from this envelope.']);
-            }
-            $this->assertBounds($field);
-        }
 
         DB::transaction(function () use ($envelope, $validated): void {
             $record = $this->lockDraft($envelope);
+            $record->load(['document', 'signers']);
+            abort_if($record->document === null, 409, 'The draft has no document for field placement.');
+            $signerIds = $record->signers->modelKeys();
+
+            foreach ($validated as $field) {
+                if (! in_array((int) $field['assignee_id'], $signerIds, true)
+                    || (int) $field['page'] > $record->document->page_count) {
+                    throw ValidationException::withMessages(['fields_json' => 'Every field must use a signer and page from this envelope.']);
+                }
+                $this->assertBounds($field);
+            }
+
             $record->fields()->delete();
 
             foreach ($validated as $field) {
@@ -272,12 +255,16 @@ final readonly class EnvelopeController
     public function saveAsTemplate(Request $request, int $envelope): RedirectResponse
     {
         $user = $this->user($request);
-        $record = $this->findDraft($user, $envelope, ['document', 'signers.fields']);
+        $this->findDraft($user, $envelope);
         $data = $request->validate(['name' => ['required', 'string', 'max:255']]);
-        $path = $this->pdfs->copy($record->document->storage_path, (int) $this->selectedTeam->get()->getKey());
+        $path = null;
 
         try {
-            $template = DB::transaction(function () use ($record, $user, $data, $path): Template {
+            $template = DB::transaction(function () use ($envelope, $user, $data, &$path): Template {
+                $record = $this->lockDraft($envelope);
+                $record->load(['document', 'signers.fields']);
+                abort_if($record->document === null, 409, 'The draft has no document to capture.');
+                $path = $this->pdfs->copy($record->document->storage_path, (int) $this->selectedTeam->get()->getKey());
                 $template = new Template([
                     'name' => $data['name'],
                     'title' => $record->title,
@@ -311,7 +298,9 @@ final readonly class EnvelopeController
                 return $template;
             });
         } catch (Throwable $exception) {
-            $this->pdfs->delete($path);
+            if ($path !== null) {
+                $this->pdfs->deleteOrQueue($path);
+            }
             throw $exception;
         }
 
