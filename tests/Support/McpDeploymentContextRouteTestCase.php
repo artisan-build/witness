@@ -41,7 +41,8 @@ abstract class McpDeploymentContextRouteTestCase extends TestCase
         foreach ($this->previousEnvironment as $name => $value) {
             if ($value === false) {
                 putenv($name);
-                unset($_ENV[$name], $_SERVER[$name]);
+                $_ENV = array_diff_key($_ENV, [$name => true]);
+                $_SERVER = array_diff_key($_SERVER, [$name => true]);
 
                 continue;
             }
