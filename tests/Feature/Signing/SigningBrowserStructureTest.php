@@ -33,7 +33,7 @@ it('ships the complete local signer browser structure and real-text fixture', fu
 });
 
 it('keeps every signer route outside human authentication middleware', function (): void {
-    $routes = collect(app('router')->getRoutes()->getRoutes())
+    $routes = collect(resolve('router')->getRoutes()->getRoutes())
         ->filter(fn (Route $route): bool => $route->getControllerClass() === SigningController::class);
 
     expect($routes)->toHaveCount(8);

@@ -118,7 +118,7 @@ it('serializes signing against decline and records exactly one terminal outcome'
         if ($envelopeId !== null) {
             $statement = $setup->prepare('SELECT verb_event_id FROM audit_events WHERE envelope_id = ?');
             $statement->execute([$envelopeId]);
-            $verbEventIds = array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+            $verbEventIds = array_map(intval(...), $statement->fetchAll(PDO::FETCH_COLUMN));
             $setup->beginTransaction();
             $setup->exec("SET LOCAL witness.purge_envelope = '{$envelopeId}'");
             $setup->prepare('DELETE FROM audit_events WHERE envelope_id = ?')->execute([$envelopeId]);

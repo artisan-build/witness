@@ -27,32 +27,59 @@ use Illuminate\Validation\ValidationException;
 it('keeps invalid, cross-envelope, sender-session, and terminal access neutral', function (): void {
     [$envelopeA, $signerA, $tokenA] = createSigningEnvelope([FieldType::Signature]);
     [$envelopeB, $signerB, $tokenB] = createSigningEnvelope([FieldType::Signature]);
-    $neutral = $this->get(route('sign.open', 'tok123456'))->assertOk()->getContent();
+    $initialAuditCounts = [$envelopeA->auditEvents()->count(), $envelopeB->auditEvents()->count()];
+    $this->get(route('sign.open', 'tok123456'))
+        ->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertSee('This signing link is unavailable')
+        ->assertDontSee($envelopeA->title)
+        ->assertDontSee($envelopeB->title)
+        ->assertDontSee($signerA->email)
+        ->assertDontSee($signerB->email);
+    expect([$envelopeA->auditEvents()->count(), $envelopeB->auditEvents()->count()])->toBe($initialAuditCounts);
 
     $this->actingAsVersioned($envelopeA->sender)
         ->get(route('sign.show'))
         ->assertOk()
-        ->assertSee('data-testid="signer-neutral"', false);
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertSee('This signing link is unavailable')
+        ->assertDontSee($envelopeA->title)
+        ->assertDontSee($signerA->email);
+    expect([$envelopeA->auditEvents()->count(), $envelopeB->auditEvents()->count()])->toBe($initialAuditCounts);
 
     openAndVerifySigner($this, $tokenA);
     $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
     $foreignField = $signerB->fields()->firstOrFail();
     $ownField = $signerA->fields()->firstOrFail();
+    $auditCountBeforeForeignWrite = $envelopeA->auditEvents()->count();
     $this->post(route('sign.fields'), [
         'fields' => [$foreignField->getKey() => ['kind' => 'typed', 'typed' => 'Not mine']],
-    ])->assertOk()->assertSee('data-testid="signer-neutral"', false);
+    ])->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertSee('This signing link is unavailable')
+        ->assertDontSee($envelopeB->title)
+        ->assertDontSee($signerB->email);
 
     expect($foreignField->fresh()->value)->toBeNull()
-        ->and($ownField->fresh()->value)->toBeNull();
+        ->and($ownField->fresh()->value)->toBeNull()
+        ->and($envelopeA->auditEvents()->count())->toBe($auditCountBeforeForeignWrite);
 
     openAndVerifySigner($this, $tokenA);
     resolve(DeclineEnvelope::class)->handle($signerA->fresh(), 'I cannot agree.', '198.51.100.8', 'Security test');
-    $terminalA = $this->get(route('sign.open', $tokenA))->assertOk()->getContent();
+    $terminalAuditCount = $envelopeA->auditEvents()->count();
+    $this->get(route('sign.open', $tokenA))
+        ->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertSee('This signing link is unavailable')
+        ->assertDontSee($envelopeA->title)
+        ->assertDontSee($signerA->email)
+        ->assertDontSee('I cannot agree.');
     $stillValidB = $this->get(route('sign.open', $tokenB));
 
-    expect($terminalA)->toBe($neutral)
-        ->and($stillValidB->isRedirect(route('sign.show')))->toBeTrue()
+    expect($stillValidB->isRedirect(route('sign.show')))->toBeTrue()
         ->and($envelopeA->fresh()->status)->toBe(EnvelopeStatus::Declined)
+        ->and($signerA->fresh()->decline_reason)->toBe('I cannot agree.')
+        ->and($envelopeA->auditEvents()->count())->toBe($terminalAuditCount)
         ->and($envelopeB->fresh()->status)->toBe(EnvelopeStatus::Sent);
 });
 
@@ -159,7 +186,7 @@ it('redacts short rejected codes from exception traces and durable non-secret co
         test()->fail('The rejected code unexpectedly verified.');
     } catch (ValidationException $exception) {
         $traceStrings = collect($exception->getTrace())
-            ->flatMap(fn (array $frame): array => array_values(array_filter($frame['args'] ?? [], 'is_string')))
+            ->flatMap(fn (array $frame): array => array_values(array_filter($frame['args'] ?? [], is_string(...))))
             ->implode('|');
         expect($traceStrings)->not->toContain($canary);
     }
@@ -178,9 +205,7 @@ it('rejects direct signer progress writes and uses the configured default mailer
     ))->toThrow(QueryException::class, 'locked domain action');
 
     Mail::assertSent(SigningCode::class, 0);
-    Mail::assertSent(SigningInvitation::class, function ($mail): bool {
-        return in_array($mail->mailer, [null, config('mail.default')], true);
-    });
+    Mail::assertSent(SigningInvitation::class, fn ($mail): bool => in_array($mail->mailer, [null, config('mail.default')], true));
 });
 
 it('resolves both supported default mailer configurations without Witness transport code', function (): void {

@@ -12,7 +12,7 @@ use Illuminate\Http\Request;
 
 final class SigningSession
 {
-    private const KEY = 'witness.signer';
+    private const string KEY = 'witness.signer';
 
     public function bind(Request $request, Signer $signer, string $tokenHash): void
     {

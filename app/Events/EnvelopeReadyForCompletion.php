@@ -7,9 +7,9 @@ namespace App\Events;
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
 use Illuminate\Foundation\Events\Dispatchable;
 
-final class EnvelopeReadyForCompletion implements ShouldDispatchAfterCommit
+final readonly class EnvelopeReadyForCompletion implements ShouldDispatchAfterCommit
 {
     use Dispatchable;
 
-    public function __construct(public readonly int $envelopeId) {}
+    public function __construct(public int $envelopeId) {}
 }

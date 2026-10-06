@@ -82,7 +82,7 @@ final class SignEnvelope
         });
 
         if ($lastSigner) {
-            EnvelopeReadyForCompletion::dispatch((int) $signer->envelope_id);
+            event(new EnvelopeReadyForCompletion((int) $signer->envelope_id));
         }
 
         return $signer;
