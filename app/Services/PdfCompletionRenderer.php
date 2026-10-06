@@ -252,18 +252,15 @@ final readonly class PdfCompletionRenderer
             );
         }
 
-        $wrapped = [];
-        foreach ($lines as $line) {
-            array_push($wrapped, ...$this->wrap(
-                $this->fontCoverage->escapeUnsupported(PdfFontCoverage::TEXT, $line),
-                96,
-            ));
-        }
-        $this->fontCoverage->assertSupported(PdfFontCoverage::TEXT, implode("\n", $wrapped));
+        $lines = array_map(
+            fn (string $line): string => $this->fontCoverage->escapeUnsupported(PdfFontCoverage::TEXT, $line),
+            $lines,
+        );
+        $this->fontCoverage->assertSupported(PdfFontCoverage::TEXT, implode("\n", $lines));
 
         $pageCount = 0;
         $y = 0.0;
-        foreach ($wrapped as $line) {
+        foreach ($lines as $line) {
             if ($pageCount === 0) {
                 $pdf->addPage(['format' => '', 'width' => 612, 'height' => 792, 'orientation' => 'P']);
                 $pageCount++;
@@ -456,26 +453,6 @@ final readonly class PdfCompletionRenderer
         }
 
         return $normalized;
-    }
-
-    /** @return list<string> */
-    private function wrap(string $line, int $width): array
-    {
-        if ($line === '') {
-            return [''];
-        }
-
-        $lines = [];
-        while (mb_strlen($line) > $width) {
-            $candidate = mb_substr($line, 0, $width + 1);
-            $break = mb_strrpos($candidate, ' ');
-            $take = $break === false || $break < 20 ? $width : $break;
-            $lines[] = mb_substr($line, 0, $take);
-            $line = ltrim(mb_substr($line, $take));
-        }
-        $lines[] = $line;
-
-        return $lines;
     }
 
     private function assertFonts(): void

@@ -3,7 +3,7 @@
         <div>
             <p class="witness-kicker">Template #{{ $template->getKey() }}</p>
             <h1>{{ $template->name }}</h1>
-            <p>{{ $template->original_name }} &middot; {{ $template->page_count }} pages</p>
+            <p>{{ $template->original_name }} &middot; {{ $template->page_count }} {{ Str::plural('page', $template->page_count) }}</p>
         </div>
         <flux:button :href="route('sender.templates.send-form', $template)" variant="primary">Use template</flux:button>
     </header>
@@ -24,7 +24,7 @@
                     @csrf
                     @method('PUT')
                     <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
-                    <flux:button type="submit">Replace</flux:button>
+                    <button class="witness-button" type="submit">Replace</button>
                 </form>
             </section>
 
@@ -108,7 +108,7 @@
         <aside class="witness-panel witness-review" data-testid="template-review">
             <p class="witness-kicker">Template summary</p>
             <h2>{{ $template->roles->count() }} roles</h2>
-            <p>{{ $template->fields->count() }} reusable fields across {{ $template->page_count }} pages.</p>
+            <p>{{ $template->fields->count() }} reusable fields across {{ $template->page_count }} {{ Str::plural('page', $template->page_count) }}.</p>
             <flux:button :href="route('sender.templates.send-form', $template)" variant="primary" class="witness-button-full">Map signers</flux:button>
         </aside>
     </div>

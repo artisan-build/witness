@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Actions\SendEnvelope;
+use App\Enums\FieldType;
 use App\Http\Controllers\SigningController;
+use App\Mail\SigningInvitation;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Mail;
 use Tests\Support\RealTextPdfFixture;
 
 it('ships the complete local signer browser structure and real-text fixture', function (): void {
@@ -17,19 +21,95 @@ it('ships the complete local signer browser structure and real-text fixture', fu
     expect($view)->toContain('data-testid="signer-pdf-viewer"')
         ->toContain('data-testid="signer-fields"')
         ->toContain('data-testid="signer-field"')
+        ->toContain('data-testid="signer-field-overlays"')
+        ->toContain('data-testid="signer-field-overlay"')
+        ->toContain('data-field-page=')
+        ->toContain('viewBox="0 0 1 1"')
+        ->toContain('vector-effect="non-scaling-stroke"')
+        ->toContain('tabindex="-1"')
+        ->not->toContain('style=')
         ->toContain('data-testid="signer-intent"')
         ->toContain('data-testid="signer-decline"')
         ->toContain('data-signature-canvas')
         ->and($script)->toContain("import * as pdfjsLib from './pdf.min.mjs'")
         ->toContain('isEvalSupported: false')
+        ->toContain('canvas.width = viewport.width')
+        ->toContain('canvas.height = viewport.height')
+        ->not->toContain('.style')
+        ->toContain("fieldset.addEventListener('focusin'")
+        ->toContain("fieldset?.querySelector('input, textarea, button') ?? fieldset")
+        ->toContain("scrollIntoView({ block: 'nearest', inline: 'nearest' })")
+        ->toContain('focusedFieldId')
         ->toContain("canvas.toDataURL('image/png')")
         ->and($styles)->toContain('.signing-script')
         ->toContain('.signing-draw canvas')
+        ->toContain('.signing-field-overlay rect')
+        ->toContain('.signing-field-overlay.is-page-hidden')
         ->and($fixture)->toContain('Witness signing fixture - page 1')
         ->toContain('Witness signing fixture - page 2')
         ->toContain('Visible agreement text for browser verification.')
         ->and(file_exists(public_path('build/assets/pdf.min.mjs')))->toBeTrue()
         ->and(file_exists(public_path('build/assets/pdf.worker.min.mjs')))->toBeTrue();
+});
+
+it('renders only the active signer fields as page-relative overlays', function (): void {
+    [$envelope, $signer] = createSigningEnvelope(FieldType::cases(), false);
+    $otherSigner = $envelope->signers()->create([
+        'name' => 'Other Signer',
+        'email' => 'other@example.test',
+        'position' => 1,
+    ]);
+    $otherField = $otherSigner->fields()->create([
+        'page' => 2,
+        'type' => FieldType::Signature,
+        'required' => true,
+        'position_x' => .71,
+        'position_y' => .62,
+        'width' => .07,
+        'height' => .06,
+    ]);
+    resolve(SendEnvelope::class)->handle($envelope->team, $envelope->sender, $envelope->getKey());
+
+    $token = null;
+    Mail::assertSent(SigningInvitation::class, function (SigningInvitation $mail) use ($signer, &$token): bool {
+        if ($mail->signer->is($signer)) {
+            $token = $mail->linkToken;
+        }
+
+        return $mail->signer->is($signer);
+    });
+    expect($token)->toBeString();
+    assert(is_string($token));
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+
+    $response = $this->get(route('sign.show'))->assertOk();
+    foreach ($signer->fields as $field) {
+        $response->assertSee('data-testid="signer-field-overlay"', false)
+            ->assertSee('data-field-id="'.$field->getKey().'"', false)
+            ->assertSee('data-field-page="'.$field->page.'"', false)
+            ->assertSee('id="signer-field-'.$field->getKey().'"', false);
+    }
+    $response->assertDontSee('data-field-id="'.$otherField->getKey().'"', false)
+        ->assertDontSee('Other Signer');
+
+    $dateField = $signer->fields->firstWhere('type', FieldType::DateSigned);
+    expect($dateField)->not->toBeNull();
+    $document = new DOMDocument;
+    @$document->loadHTML((string) $response->getContent());
+    $xpath = new DOMXPath($document);
+    expect($xpath->query('//fieldset[@id="signer-field-'.$dateField?->getKey().'" and @tabindex="-1"]')->length)->toBe(1);
+    foreach ($signer->fields as $field) {
+        $geometry = sprintf(
+            '//*[@data-testid="signer-field-overlay" and @data-field-id="%s"]/rect[@x="%s" and @y="%s" and @width="%s" and @height="%s"]',
+            $field->getKey(),
+            (float) $field->position_x,
+            (float) $field->position_y,
+            (float) $field->width,
+            (float) $field->height,
+        );
+        expect($xpath->query($geometry)->length)->toBe(1);
+    }
 });
 
 it('keeps every signer route outside human authentication middleware', function (): void {

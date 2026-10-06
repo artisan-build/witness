@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Mail\SetupTestMail;
+use App\Support\SetupInstructions;
 use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -20,6 +21,7 @@ final class SetupController
         return view('sender.setup', [
             'cloudDomain' => is_string($host) && str_ends_with($host, '.laravel.cloud'),
             'mailer' => (string) config('mail.default'),
+            'instructions' => SetupInstructions::sections(),
         ]);
     }
 

@@ -538,6 +538,16 @@ it('lays out long certificate evidence without overlapping emitted text lines', 
             ['attempt' => $attempt],
         );
     }
+    $groupedUserAgent = 'GROUP-START '.str_repeat('fitting-audit-event ', 25).'GROUP-END';
+    EnvelopeLifecycleRecorded::record(
+        $envelope,
+        AuditEventType::CodeFailed,
+        AuditActorType::Signer,
+        $signer->getKey(),
+        '192.0.2.12',
+        $groupedUserAgent,
+        ['attempt' => 81],
+    );
     DB::transaction(function () use ($signer): void {
         DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
         Signer::query()->whereKey($signer)->update([
@@ -559,8 +569,13 @@ it('lays out long certificate evidence without overlapping emitted text lines', 
     $inspector = new RenderedPdfInspector($completed->bytes);
     $overlaps = [];
     $certificateText = '';
+    $groupedEventPages = [];
     for ($page = $completed->sourcePageCount + 1; $page <= $completed->sourcePageCount + $completed->certificatePageCount; $page++) {
         $boxes = $inspector->textLineBoxes($page);
+        $pageText = collect($boxes)->pluck('text')->implode('');
+        if (str_contains($pageText, 'GROUP-START') || str_contains($pageText, 'GROUP-END')) {
+            $groupedEventPages[$page] = $pageText;
+        }
         foreach ($boxes as $index => $box) {
             $certificateText .= $box['text'];
             foreach (array_slice($boxes, $index + 1) as $other) {
@@ -580,7 +595,11 @@ it('lays out long certificate evidence without overlapping emitted text lines', 
         ->and($overlaps)->toBe([])
         ->and(str_replace(' ', '', $certificateText))->toContain(str_replace(' ', '', $longUserAgent.'1'))
         ->and($certificateText)->toContain($envelope->document->original_sha256)
-        ->and($certificateText)->toContain($completed->contentSha256);
+        ->and($certificateText)->toContain($completed->contentSha256)
+        ->and($groupedEventPages)->toHaveCount(1);
+    $groupedPageText = array_values($groupedEventPages)[0];
+    expect($groupedPageText)->toContain('GROUP-START', 'GROUP-END')
+        ->and(str_replace(' ', '', $groupedPageText))->toContain(str_replace(' ', '', $groupedUserAgent));
     $pdf = new Tcpdf;
     $source = $pdf->setImportSourceData($completed->bytes, ['strict_limits' => true]);
     expect($pdf->getSourcePageCount($source))->toBe(
