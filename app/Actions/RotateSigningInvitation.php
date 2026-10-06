@@ -23,16 +23,16 @@ final readonly class RotateSigningInvitation
 {
     public function __construct(private OutboundMailDelivery $mailDelivery) {}
 
-    public function handle(Team $team, User $sender, int $envelopeId, int $signerId): bool
+    public function handle(Team $team, ?User $sender, int $envelopeId, int $signerId, ?string $ipAddress = null, ?string $userAgent = null): bool
     {
-        if (! $team->hasMember($sender)) {
+        if ($sender !== null && ! $team->hasMember($sender)) {
             throw new DomainException('The sender must belong to the envelope team.');
         }
 
         [$envelope, $signer, $token, $delivery] = DB::transaction(function () use ($team, $sender, $envelopeId, $signerId): array {
             $envelope = Envelope::query()
                 ->forTeam($team)
-                ->where('sender_id', $sender->getKey())
+                ->when($sender !== null, fn ($query) => $query->where('sender_id', $sender->getKey()))
                 ->lockForUpdate()
                 ->findOrFail($envelopeId);
             $signer = Signer::query()
@@ -40,7 +40,7 @@ final readonly class RotateSigningInvitation
                 ->lockForUpdate()
                 ->findOrFail($signerId);
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || in_array($signer->status, [SignerStatus::Signed, SignerStatus::Declined], true)) {
                 throw new DomainException('Only a non-terminal signer on a sent envelope may receive a new link.');
             }
@@ -62,12 +62,21 @@ final readonly class RotateSigningInvitation
             ];
         });
 
-        return $this->mailDelivery->deliver(
+        $delivered = $this->mailDelivery->deliver(
             $delivery,
             fn () => Mail::to($signer->email)->send(new SigningInvitation($envelope, $signer, $token)),
-            AuditEventType::EmailSent,
-            AuditActorType::System,
+            AuditEventType::Reminded,
+            $sender === null ? AuditActorType::System : AuditActorType::Sender,
+            actorId: $sender?->getKey(),
+            ipAddress: $ipAddress,
+            userAgent: $userAgent,
             payload: ['signer_id' => $signer->getKey()],
         );
+
+        if ($delivered) {
+            Envelope::query()->whereKey($envelope)->update(['last_reminded_at' => now()]);
+        }
+
+        return $delivered;
     }
 }

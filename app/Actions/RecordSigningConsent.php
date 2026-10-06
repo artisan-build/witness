@@ -21,7 +21,7 @@ final class RecordSigningConsent
             $envelope = Envelope::query()->lockForUpdate()->findOrFail($boundSigner->envelope_id);
             $signer = Signer::query()->lockForUpdate()->findOrFail($boundSigner->getKey());
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || $signer->otp_verified_at === null
                 || $signer->link_token_hash === null) {
                 throw new SigningAccessDenied;

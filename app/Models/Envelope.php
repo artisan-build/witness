@@ -27,6 +27,7 @@ class Envelope extends Model
         'title',
         'message',
         'expires_at',
+        'reminder_interval_days',
     ];
 
     protected static function booted(): void
@@ -47,7 +48,7 @@ class Envelope extends Model
             }
 
             if ($envelope->getRawOriginal('status') !== EnvelopeStatus::Draft->value
-                && $envelope->isDirty(['title', 'message', 'expires_at'])) {
+                && $envelope->isDirty(['title', 'message', 'expires_at', 'reminder_interval_days'])) {
                 throw new \DomainException('Envelope details cannot be changed after send.');
             }
         });
@@ -107,6 +108,8 @@ class Envelope extends Model
         return [
             'status' => EnvelopeStatus::class,
             'expires_at' => 'immutable_datetime',
+            'last_reminded_at' => 'immutable_datetime',
+            'reminder_interval_days' => 'integer',
             'sent_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',
             'audit_event_count' => 'integer',

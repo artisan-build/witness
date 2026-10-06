@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\CreateDraftEnvelope;
+use App\Actions\PurgeEnvelope;
+use App\Actions\RetryEnvelopeCompletion;
 use App\Actions\RotateSigningInvitation;
 use App\Actions\SendEnvelope;
+use App\Actions\VoidEnvelope;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Models\Envelope;
 use App\Models\Template;
 use App\Rules\SupportedPdfText;
+use App\Services\EnvelopeCompletionService;
 use App\Services\PdfDocumentService;
 use App\Support\SelectedTeam;
 use ArtisanBuild\BuiltForCloud\User;
@@ -34,17 +38,23 @@ final readonly class EnvelopeController
         private CreateDraftEnvelope $createDraft,
         private SendEnvelope $sendEnvelope,
         private RotateSigningInvitation $rotateSigningInvitation,
+        private VoidEnvelope $voidEnvelope,
+        private RetryEnvelopeCompletion $retryCompletion,
+        private PurgeEnvelope $purgeEnvelope,
+        private EnvelopeCompletionService $completion,
     ) {}
 
     public function index(Request $request): View
     {
         $user = $this->user($request);
+        $status = $request->string('status')->toString();
         $envelopes = $this->baseQuery($user)
+            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
             ->with(['signers' => fn ($query) => $query->orderBy('position')])
             ->latest()
             ->get();
 
-        return view('sender.dashboard', compact('envelopes'));
+        return view('sender.dashboard', compact('envelopes', 'status'));
     }
 
     public function create(): View
@@ -97,6 +107,7 @@ final readonly class EnvelopeController
             'title' => ['required', 'string', 'max:255', new SupportedPdfText],
             'message' => ['nullable', 'string', 'max:5000'],
             'expires_at' => ['nullable', 'date', 'after:today'],
+            'reminder_interval_days' => ['nullable', 'integer', 'between:1,30'],
         ]);
         DB::transaction(function () use ($envelope, $data): void {
             $this->lockDraft($envelope)->update($data);
@@ -260,17 +271,61 @@ final readonly class EnvelopeController
         $user = $this->user($request);
 
         try {
-            $this->rotateSigningInvitation->handle(
+            $delivered = $this->rotateSigningInvitation->handle(
                 $this->selectedTeam->get(),
                 $user,
                 $envelope,
                 $signer,
+                $request->ip(),
+                $request->userAgent(),
             );
         } catch (DomainException $exception) {
             throw ValidationException::withMessages(['resend' => $exception->getMessage()]);
         }
 
-        return back()->with('status', 'A new signing link was sent.');
+        return back()->with('status', $delivered
+            ? 'A new signing link was handed to the configured mailer.'
+            : 'The mail handoff is unknown. The new link was not claimed as delivered.');
+    }
+
+    public function void(Request $request, int $envelope): RedirectResponse
+    {
+        $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
+        $this->voidEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope, $data['reason']);
+
+        return back()->with('status', 'Envelope voided. Sender notification was attempted.');
+    }
+
+    public function retryCompletion(Request $request, int $envelope): RedirectResponse
+    {
+        $this->retryCompletion->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+
+        return back()->with('status', 'Completion retry queued.');
+    }
+
+    public function resendUnknown(Request $request, int $envelope, int $delivery): RedirectResponse
+    {
+        $request->validate(['confirm_duplicate_risk' => ['accepted']]);
+        $this->findEnvelope($this->user($request), $envelope);
+        $this->completion->resendUnknown($envelope, $delivery);
+
+        return back()->with('status', 'A new final-document delivery generation was attempted.');
+    }
+
+    public function confirmDelete(Request $request, int $envelope): View
+    {
+        $record = $this->findEnvelope($this->user($request), $envelope);
+        abort_unless($record->status->isDeletable(), 409);
+
+        return view('sender.envelopes.delete', ['envelope' => $record]);
+    }
+
+    public function destroy(Request $request, int $envelope): RedirectResponse
+    {
+        $request->validate(['confirmation' => ['required', 'in:DELETE']]);
+        $this->purgeEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+
+        return to_route('sender.dashboard')->with('status', 'Envelope and its private files were deleted.');
     }
 
     public function saveAsTemplate(Request $request, int $envelope): RedirectResponse

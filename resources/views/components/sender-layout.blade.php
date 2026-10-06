@@ -12,6 +12,7 @@
             <div class="witness-nav-links">
                 <a href="{{ route('sender.dashboard') }}">Envelopes</a>
                 <a href="{{ route('sender.templates.index') }}">Templates</a>
+                <a href="{{ route('sender.setup') }}">Setup</a>
                 <a href="{{ route('sender.envelopes.create') }}" class="witness-button witness-button-small">New envelope</a>
             </div>
             @isset($selectedTeam)

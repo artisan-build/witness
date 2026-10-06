@@ -38,7 +38,7 @@ final class SignEnvelope
                 return $signer;
             }
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || $signer->consented_at === null
                 || $signer->otp_verified_at === null
                 || $signer->status === SignerStatus::Declined) {

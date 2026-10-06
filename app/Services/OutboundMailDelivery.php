@@ -71,6 +71,30 @@ final class OutboundMailDelivery
         return $delivery;
     }
 
+    public function createFinalGeneration(MailDelivery $previous): MailDelivery
+    {
+        $generation = ((int) MailDelivery::query()
+            ->where('envelope_id', $previous->envelope_id)
+            ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+            ->where('recipient_kind', $previous->recipient_kind)
+            ->where('recipient_email', $previous->recipient_email)
+            ->max('generation')) + 1;
+
+        $delivery = new MailDelivery([
+            'purpose' => MailDeliveryPurpose::FinalDocument,
+            'recipient_kind' => $previous->recipient_kind,
+            'recipient_name' => $previous->recipient_name,
+            'recipient_email' => $previous->recipient_email,
+            'generation' => $generation,
+            'status' => MailDeliveryStatus::Pending,
+        ]);
+        $delivery->envelope_id = $previous->envelope_id;
+        $delivery->signer_id = $previous->signer_id;
+        $delivery->save();
+
+        return $delivery;
+    }
+
     /**
      * @param  Closure(): void  $handoff
      * @param  array<string, mixed>  $payload

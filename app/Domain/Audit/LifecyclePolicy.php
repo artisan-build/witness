@@ -50,6 +50,24 @@ final class LifecyclePolicy
             return;
         }
 
+        if (in_array($type, [AuditEventType::Voided, AuditEventType::Expired], true)) {
+            $requiredActor = $type === AuditEventType::Voided ? AuditActorType::Sender : AuditActorType::System;
+            if ($envelope->status !== EnvelopeStatus::Sent || $actorType !== $requiredActor) {
+                throw new DomainException("The {$type->value} event is not valid for this envelope and actor.");
+            }
+
+            return;
+        }
+
+        if ($type === AuditEventType::Reminded) {
+            if ($envelope->status !== EnvelopeStatus::Sent
+                || ! in_array($actorType, [AuditActorType::Sender, AuditActorType::System], true)) {
+                throw new DomainException('The reminded event requires an active sent envelope and its sender or the system actor.');
+            }
+
+            return;
+        }
+
         if ($envelope->status !== EnvelopeStatus::Sent) {
             throw new DomainException('Signing lifecycle events require an active sent envelope.');
         }
@@ -92,6 +110,9 @@ final class LifecyclePolicy
             AuditEventType::FieldCompleted,
             AuditEventType::Signed,
             AuditEventType::Declined,
+            AuditEventType::Reminded,
+            AuditEventType::Voided,
+            AuditEventType::Expired,
             AuditEventType::Completed,
             AuditEventType::FinalDelivered,
         ], true)) {

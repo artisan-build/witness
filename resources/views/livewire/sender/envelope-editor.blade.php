@@ -19,6 +19,7 @@
                     <flux:input name="title" label="Title" :value="old('title', $envelope->title)" required :disabled="!$envelope->status->isDraft()" />
                     <flux:textarea name="message" label="Message" rows="4" :disabled="!$envelope->status->isDraft()">{{ old('message', $envelope->message) }}</flux:textarea>
                     <flux:input type="date" name="expires_at" label="Expires on" :value="old('expires_at', $envelope->expires_at?->format('Y-m-d'))" :disabled="!$envelope->status->isDraft()" />
+                    <flux:input type="number" min="1" max="30" name="reminder_interval_days" label="Automatic reminder interval in days (leave blank for off)" :value="old('reminder_interval_days', $envelope->reminder_interval_days)" :disabled="!$envelope->status->isDraft()" />
                     @if ($envelope->status->isDraft())
                         <flux:button type="submit" variant="primary">Save details</flux:button>
                     @endif
@@ -164,6 +165,48 @@
             @else
                 <p class="witness-frozen">Sent {{ $envelope->sent_at?->diffForHumans() }}. Document and fields are locked.</p>
             @endif
+
+            <div class="witness-actions" data-testid="envelope-downloads">
+                <a class="witness-button witness-button-small" href="{{ route('sender.envelopes.document.show', $envelope) }}">Original PDF</a>
+                @if ($envelope->status === \App\Enums\EnvelopeStatus::Completed)
+                    <a class="witness-button witness-button-small" href="{{ route('sender.envelopes.final-document', $envelope) }}">Final PDF</a>
+                @endif
+            </div>
+
+            @if ($envelope->status === \App\Enums\EnvelopeStatus::Sent)
+                <form method="POST" action="{{ route('sender.envelopes.void', $envelope) }}" class="witness-stack" data-testid="void-envelope">
+                    @csrf
+                    <flux:textarea name="reason" label="Reason for voiding" required />
+                    <flux:button type="submit" variant="danger">Void envelope</flux:button>
+                </form>
+            @elseif ($envelope->status === \App\Enums\EnvelopeStatus::CompletionFailed)
+                <div data-testid="completion-failed"><strong>Completion failed.</strong> Your signatures and audit evidence are preserved.</div>
+                <form method="POST" action="{{ route('sender.envelopes.retry-completion', $envelope) }}">@csrf
+                    <flux:button type="submit" variant="primary">Retry completion</flux:button>
+                </form>
+            @endif
+
+            @foreach ($envelope->mailDeliveries->where('status', \App\Enums\MailDeliveryStatus::Unknown)->where('purpose', \App\Enums\MailDeliveryPurpose::FinalDocument) as $delivery)
+                <form method="POST" action="{{ route('sender.envelopes.deliveries.resend', [$envelope, $delivery]) }}" class="witness-stack" data-testid="unknown-delivery-recovery">
+                    @csrf
+                    <p>Delivery to {{ $delivery->recipient_name }} is unknown. It may already have succeeded; resending can create a duplicate.</p>
+                    <label><input type="checkbox" name="confirm_duplicate_risk" value="1" required> I understand the duplicate-delivery risk.</label>
+                    <flux:button type="submit">Create a new delivery generation</flux:button>
+                </form>
+            @endforeach
+
+            @if ($envelope->status->isDeletable())
+                <a class="witness-button witness-button-small" href="{{ route('sender.envelopes.delete', $envelope) }}" data-testid="delete-envelope">Delete envelope</a>
+            @endif
         </aside>
     </div>
+
+    <section class="witness-panel" data-testid="audit-log">
+        <h2>Audit log</h2>
+        <ol class="witness-summary-list">
+            @foreach ($envelope->auditEvents as $event)
+                <li><strong>{{ str($event->type->value)->replace('_', ' ')->title() }}</strong> <span>{{ $event->occurred_at->toDayDateTimeString() }} · {{ $event->actor_type->value }}</span></li>
+            @endforeach
+        </ol>
+    </section>
 </div>
