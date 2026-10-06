@@ -11,6 +11,7 @@ use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Models\Envelope;
 use App\Models\Template;
+use App\Rules\SupportedPdfText;
 use App\Services\PdfDocumentService;
 use App\Support\SelectedTeam;
 use ArtisanBuild\BuiltForCloud\User;
@@ -55,7 +56,7 @@ final readonly class EnvelopeController
     {
         $user = $this->user($request);
         $data = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255', new SupportedPdfText],
             'document' => ['required', 'file', 'max:20480'],
         ]);
         $pdf = $this->pdfs->inspect($data['document']);
@@ -93,7 +94,7 @@ final readonly class EnvelopeController
     {
         $this->findDraft($this->user($request), $envelope);
         $data = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255', new SupportedPdfText],
             'message' => ['nullable', 'string', 'max:5000'],
             'expires_at' => ['nullable', 'date', 'after:today'],
         ]);
@@ -147,8 +148,8 @@ final readonly class EnvelopeController
         $data = $request->validate([
             'signers' => ['present', 'array', 'max:50'],
             'signers.*.id' => ['nullable', 'integer'],
-            'signers.*.name' => ['required', 'string', 'max:255'],
-            'signers.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case'],
+            'signers.*.name' => ['required', 'string', 'max:255', new SupportedPdfText],
+            'signers.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case', new SupportedPdfText],
             'signers.*.role_label' => ['nullable', 'string', 'max:255'],
         ]);
 

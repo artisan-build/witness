@@ -21,6 +21,9 @@ class MailDelivery extends Model
 {
     protected $fillable = [
         'purpose',
+        'recipient_kind',
+        'recipient_name',
+        'recipient_email',
         'generation',
         'status',
         'attempted_at',

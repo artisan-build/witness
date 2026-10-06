@@ -9,4 +9,5 @@ enum MailDeliveryPurpose: string
     case SigningInvitation = 'signing_invitation';
     case SigningCode = 'signing_code';
     case DeclineNotification = 'decline_notification';
+    case FinalDocument = 'final_document';
 }

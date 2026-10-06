@@ -24,6 +24,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Thunk\Verbs\Models\VerbEvent;
 
 function createSecurityEnvelope(string $contents = 'security document'): array
@@ -78,7 +79,7 @@ it('roots genesis in the document hash frozen at send', function (): void {
         ->and($result->valid)->toBeTrue();
 });
 
-it('allows only locked domain actions to write signer results and final artifacts', function (): void {
+it('allows only locked domain actions to write signer results and refuses premature final artifacts', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     $signer = Signer::factory()->for($envelope)->create();
     $field = Field::factory()->forSigner($signer)->create();
@@ -91,16 +92,16 @@ it('allows only locked domain actions to write signer results and final artifact
         ['text' => 'Approved'],
         now(),
     );
-    $document = resolve(StoreFinalDocument::class)->handle(
-        $envelope,
-        'documents/final.pdf',
-        hash('sha256', 'final document'),
-    );
+    Storage::fake('local');
+    Storage::put('documents/final.pdf', 'final document');
 
     expect($field->value)->toBe(['text' => 'Approved'])
         ->and($field->completed_at)->not->toBeNull()
-        ->and($document->final_storage_path)->toBe('documents/final.pdf')
-        ->and($document->final_sha256)->toBe(hash('sha256', 'final document'));
+        ->and(fn () => resolve(StoreFinalDocument::class)->handle(
+            $envelope,
+            'documents/final.pdf',
+            hash('sha256', 'final document'),
+        ))->toThrow(DomainException::class, 'fully signed');
 });
 
 it('rejects direct result and final artifact writes', function (): void {
@@ -208,7 +209,7 @@ it('enforces actor identity and rejects unimplemented lifecycle events', functio
         ->toThrow(DomainException::class, 'cannot have')
         ->and(fn () => EnvelopeLifecycleRecorded::record(
             $envelope,
-            AuditEventType::Completed,
+            AuditEventType::Reminded,
             AuditActorType::Sender,
             $sender->getKey(),
         ))->toThrow(DomainException::class, 'not implemented');

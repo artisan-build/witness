@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Actions\CreateDraftEnvelope;
 use App\Enums\FieldType;
 use App\Models\Template;
+use App\Rules\SupportedPdfText;
 use App\Services\PdfDocumentService;
 use App\Support\SelectedTeam;
 use ArtisanBuild\BuiltForCloud\User;
@@ -46,7 +47,7 @@ final readonly class TemplateController
         $user = $this->user($request);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'title' => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255', new SupportedPdfText],
             'message' => ['nullable', 'string', 'max:5000'],
             'document' => ['required', 'file', 'max:20480'],
         ]);
@@ -87,7 +88,7 @@ final readonly class TemplateController
         $this->findTemplate($this->user($request), $template);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'title' => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255', new SupportedPdfText],
             'message' => ['nullable', 'string', 'max:5000'],
         ]);
         DB::transaction(function () use ($template, $data): void {
@@ -235,8 +236,8 @@ final readonly class TemplateController
         $this->findTemplate($user, $template);
         $data = $request->validate([
             'roles' => ['required', 'array'],
-            'roles.*.name' => ['required', 'string', 'max:255'],
-            'roles.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case'],
+            'roles.*.name' => ['required', 'string', 'max:255', new SupportedPdfText],
+            'roles.*.email' => ['required', 'email:rfc', 'max:255', 'distinct:ignore_case', new SupportedPdfText],
             'message' => ['nullable', 'string', 'max:5000'],
             'expires_at' => ['nullable', 'date', 'after:today'],
         ]);

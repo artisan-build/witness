@@ -1,0 +1,381 @@
+{
+    "generator": "tests/Fixtures/Pdf/generate.php",
+    "fixtures": {
+        "classic-1.4-letter.pdf": {
+            "sha256": "218bff1eb581d0d3b750c5b763839f2a847b6da65c1eff06c48f6c16adcaf785",
+            "bytes": 1528,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        612,
+                        792
+                    ]
+                }
+            ]
+        },
+        "object-stream-1.7-a4.pdf": {
+            "sha256": "2aec4d6762b0a22db6e397dd94d8d456171cfa35e22532e002c2be6e1c59b4f6",
+            "bytes": 1520,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        595.276,
+                        841.89
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        595.276,
+                        841.89
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        595.276,
+                        841.89
+                    ]
+                }
+            ]
+        },
+        "rotated-mixed-sizes.pdf": {
+            "sha256": "b023ea8e632296a7638de2cb70946848f6bae784e554978dba9b01b30fd28a20",
+            "bytes": 2524,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        612,
+                        792
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 90,
+                    "displayed": [
+                        440,
+                        260
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        1008,
+                        612
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        1008,
+                        612
+                    ],
+                    "rotation": 270,
+                    "displayed": [
+                        612,
+                        1008
+                    ]
+                }
+            ]
+        },
+        "nonzero-cropbox-rotations.pdf": {
+            "sha256": "6a172e0ee96c015bdd217467f5eab740c9a8293e524a10efeeadfff66a13b469",
+            "bytes": 2875,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        260,
+                        440
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 0",
+                    "label_origin": [
+                        16,
+                        412
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 90,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 90",
+                    "label_origin": [
+                        412,
+                        244
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 180,
+                    "displayed": [
+                        260,
+                        440
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 180",
+                    "label_origin": [
+                        244,
+                        28
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 270,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "CROPBOX ORIGIN Rotate 270",
+                    "label_origin": [
+                        28,
+                        16
+                    ]
+                }
+            ]
+        },
+        "non-normalized-rotations.pdf": {
+            "sha256": "3f4526c7e802a5e0914f6e01f76185822d7d5cc6e0256e4088661092bf6d592d",
+            "bytes": 2433,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 450,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "NON-NORMALIZED Rotate 450",
+                    "label_origin": [
+                        412,
+                        244
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": -90,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "NON-NORMALIZED Rotate -90",
+                    "label_origin": [
+                        28,
+                        16
+                    ]
+                },
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": -270,
+                    "displayed": [
+                        440,
+                        260
+                    ],
+                    "label": "NON-NORMALIZED Rotate -270",
+                    "label_origin": [
+                        412,
+                        244
+                    ]
+                }
+            ]
+        },
+        "invalid-rotation.pdf": {
+            "sha256": "c47e342cb54d8316d021925aab5015b35625a7bea31adce1e5232b7096c64743",
+            "bytes": 1534,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        300,
+                        500
+                    ],
+                    "crop_box": [
+                        20,
+                        30,
+                        280,
+                        470
+                    ],
+                    "rotation": 45,
+                    "displayed": [
+                        440,
+                        260
+                    ]
+                }
+            ]
+        },
+        "scanned-image-letter.pdf": {
+            "sha256": "a5a161f54644191d024ece1ef8f3b0f23f252dc6e6fbee0c7dcbc15edfdeb901",
+            "bytes": 45642,
+            "encrypted": false,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        612,
+                        792
+                    ]
+                }
+            ]
+        },
+        "encrypted-password.pdf": {
+            "sha256": "69ab779262480caf8530aae58171bbca0a75a5a79a26647f6141cf2114f3b3e0",
+            "bytes": 703,
+            "encrypted": true,
+            "pages": [
+                {
+                    "media_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "crop_box": [
+                        0,
+                        0,
+                        612,
+                        792
+                    ],
+                    "rotation": 0,
+                    "displayed": [
+                        612,
+                        792
+                    ]
+                }
+            ]
+        }
+    }
+}

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Actions;
 
 use App\Enums\EnvelopeStatus;
+use App\Enums\SignerStatus;
 use App\Models\Envelope;
 use App\Models\Field;
 use App\Models\Signer;
@@ -35,6 +36,8 @@ final class UpdateFieldResponse
                 ->findOrFail($field->getKey());
 
             if ($lockedEnvelope->status !== EnvelopeStatus::Sent
+                || $lockedSigner->status === SignerStatus::Signed
+                || $lockedSigner->status === SignerStatus::Declined
                 || (int) $lockedSigner->envelope_id !== (int) $lockedEnvelope->getKey()
                 || (int) $lockedField->envelope_id !== (int) $lockedEnvelope->getKey()) {
                 throw new DomainException('A field response must target its signer on a sent envelope.');

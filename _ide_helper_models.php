@@ -112,6 +112,8 @@ namespace App\Models{
  * @property-read \App\Models\Document|null $document
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Field> $fields
  * @property-read int|null $fields_count
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\MailDelivery> $mailDeliveries
+ * @property-read int|null $mail_deliveries_count
  * @property-read \ArtisanBuild\BuiltForCloud\User $sender
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Signer> $signers
  * @property-read int|null $signers_count
@@ -191,14 +193,17 @@ namespace App\Models{
  * @property CarbonImmutable|null $attempted_at
  * @property int $id
  * @property int $envelope_id
- * @property int $signer_id
+ * @property int|null $signer_id
  * @property int $generation
  * @property \Carbon\CarbonImmutable|null $sent_at
  * @property \Carbon\CarbonImmutable|null $unknown_at
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
+ * @property string $recipient_kind
+ * @property string $recipient_name
+ * @property string $recipient_email
  * @property-read \App\Models\Envelope $envelope
- * @property-read \App\Models\Signer $signer
+ * @property-read \App\Models\Signer|null $signer
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery query()
@@ -208,6 +213,9 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereGeneration($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery wherePurpose($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereRecipientEmail($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereRecipientKind($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereRecipientName($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereSentAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereSignerId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|MailDelivery whereStatus($value)

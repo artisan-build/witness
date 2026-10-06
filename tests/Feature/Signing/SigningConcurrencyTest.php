@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Listeners\CompleteReadyEnvelope;
 use Illuminate\Support\Sleep;
 use Symfony\Component\Process\Process;
 
@@ -35,7 +36,8 @@ function startSigningOperation(string $operation, int $teamId, int $userId, int 
         'DB_DATABASE' => 'witness_app_test',
         'DB_URL' => '',
         'MAIL_MAILER' => 'array',
-        'QUEUE_CONNECTION' => 'sync',
+        'QUEUE_CONNECTION' => 'database',
+        'DB_QUEUE' => "signing-concurrency-{$operation}-{$signerId}",
         'SESSION_DRIVER' => 'array',
     ]);
     $process->setTimeout(15);
@@ -59,6 +61,7 @@ it('serializes signing against decline and records exactly one terminal outcome'
     $suffix = bin2hex(random_bytes(6));
     $userId = $teamId = $envelopeId = null;
     $verbEventIds = [];
+    $completionQueue = null;
 
     try {
         $statement = $setup->prepare('INSERT INTO users (name, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) RETURNING id');
@@ -76,6 +79,7 @@ it('serializes signing against decline and records exactly one terminal outcome'
         $statement = $setup->prepare("INSERT INTO signers (envelope_id, name, email, status, position, created_at, updated_at) VALUES (?, 'Race signer', ?, 'pending', 0, NOW(), NOW()) RETURNING id");
         $statement->execute([$envelopeId, "race-signer-{$suffix}@example.test"]);
         $signerId = (int) $statement->fetchColumn();
+        $completionQueue = "signing-concurrency-sign-{$signerId}";
         $statement = $setup->prepare("INSERT INTO fields (envelope_id, signer_id, page, type, required, position_x, position_y, width, height, created_at, updated_at) VALUES (?, ?, 1, 'signature', true, 0.1, 0.1, 0.2, 0.1, NOW(), NOW()) RETURNING id");
         $statement->execute([$envelopeId, $signerId]);
         $fieldId = (int) $statement->fetchColumn();
@@ -98,9 +102,20 @@ it('serializes signing against decline and records exactly one terminal outcome'
             ->and($decline->isRunning())->toBeTrue($decline->getOutput().$decline->getErrorOutput());
         $locker->commit();
 
-        $results = [finishSigningOperation($sign), finishSigningOperation($decline)];
+        $signResult = finishSigningOperation($sign);
+        $results = [$signResult, finishSigningOperation($decline)];
         expect(collect($results)->where('status', 'completed'))->toHaveCount(1)
             ->and(collect($results)->where('status', 'refused'))->toHaveCount(1);
+
+        $statement = $setup->prepare('SELECT payload FROM jobs WHERE queue = ?');
+        $statement->execute([$completionQueue]);
+        $completionJobs = $statement->fetchAll(PDO::FETCH_COLUMN);
+        expect($completionJobs)->toHaveCount($signResult['status'] === 'completed' ? 1 : 0);
+        if ($completionJobs !== []) {
+            /** @var array{displayName?: mixed} $payload */
+            $payload = json_decode((string) $completionJobs[0], true, flags: JSON_THROW_ON_ERROR);
+            expect($payload['displayName'] ?? null)->toBe(CompleteReadyEnvelope::class);
+        }
 
         $statement = $setup->prepare('SELECT status FROM signers WHERE id = ?');
         $statement->execute([$signerId]);
@@ -112,6 +127,9 @@ it('serializes signing against decline and records exactly one terminal outcome'
     } finally {
         if ($locker->inTransaction()) {
             $locker->rollBack();
+        }
+        if ($completionQueue !== null) {
+            $setup->prepare('DELETE FROM jobs WHERE queue = ?')->execute([$completionQueue]);
         }
         if ($envelopeId !== null) {
             $statement = $setup->prepare('SELECT verb_event_id FROM audit_events WHERE envelope_id = ?');

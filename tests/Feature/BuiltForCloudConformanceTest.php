@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Listeners\CompleteReadyEnvelope;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -81,6 +82,7 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
         ]),
         'legacy_removal' => [],
         'system_authority' => $sorted([
+            CompleteReadyEnvelope::class,
             ConsoleReKeyCommand::class,
             ConsoleRetireKeyCommand::class,
             CreateAdminCommand::class,

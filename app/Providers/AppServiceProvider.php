@@ -36,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('signing-public', static fn (Request $request): Limit => Limit::perMinute(30)
             ->by(hash('sha256', $request->ip() ?? 'unknown')));
+        RateLimiter::for('verification-public', static fn (Request $request): Limit => Limit::perMinute(10)
+            ->by(hash('sha256', $request->ip() ?? 'unknown')));
 
         $this->configureDefaults();
     }

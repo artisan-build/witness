@@ -42,8 +42,20 @@ final class LifecyclePolicy
             return;
         }
 
+        if ($type === AuditEventType::FinalDelivered) {
+            if ($envelope->status !== EnvelopeStatus::Completed || $actorType !== AuditActorType::System) {
+                throw new DomainException('The final_delivered event requires a completed envelope and the system actor.');
+            }
+
+            return;
+        }
+
         if ($envelope->status !== EnvelopeStatus::Sent) {
             throw new DomainException('Signing lifecycle events require an active sent envelope.');
+        }
+
+        if ($type === AuditEventType::Completed && $actorType !== AuditActorType::System) {
+            throw new DomainException('The completed event requires the system actor.');
         }
 
         $signerEvents = [
@@ -80,6 +92,8 @@ final class LifecyclePolicy
             AuditEventType::FieldCompleted,
             AuditEventType::Signed,
             AuditEventType::Declined,
+            AuditEventType::Completed,
+            AuditEventType::FinalDelivered,
         ], true)) {
             throw new DomainException("The {$type->value} lifecycle event is not implemented yet.");
         }
