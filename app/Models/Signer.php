@@ -25,6 +25,7 @@ class Signer extends Model
         'name',
         'email',
         'role_label',
+        'position',
         'status',
         'link_token_hash',
         'otp_hash',
@@ -70,6 +71,7 @@ class Signer extends Model
     {
         return [
             'status' => SignerStatus::class,
+            'position' => 'integer',
             'otp_expires_at' => 'immutable_datetime',
             'otp_attempts' => 'integer',
             'otp_locked_at' => 'immutable_datetime',

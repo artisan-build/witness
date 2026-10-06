@@ -1,15 +1,17 @@
 <?php
 
+use App\Http\Controllers\SenderDashboardController;
 use ArtisanBuild\BuiltForCloud\BuiltForCloudServiceProvider;
 use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
-it('owns only the D-UI-3 application configuration overlay', function (): void {
+it('owns the application manifest UI overlay and sender dashboard target', function (): void {
     /** @var array<string, mixed> $appConfig */
     $appConfig = require config_path('built-for-cloud.php');
 
     expect($appConfig)->toBe([
+        'dashboard' => SenderDashboardController::class,
         'manifest' => [
             'name' => 'Witness',
             'slug' => 'witness',
@@ -50,7 +52,8 @@ it('merges package defaults and auto-discovers the released provider', function 
         'session_management' => false,
         'managed_transitions' => false,
         'credential_purposes' => [],
-    ])->and(config('built-for-cloud.product'))->toBe(config('app.name'))
+    ])->and(config('built-for-cloud.dashboard'))->toBe(SenderDashboardController::class)
+        ->and(config('built-for-cloud.product'))->toBe(config('app.name'))
         ->and(config('built-for-cloud.credentials.guard'))->toBe('bfc')
         ->and(config('auth.defaults.guard'))->toBe('web')
         ->and(config('auth.providers.users.model'))->toBe(User::class)

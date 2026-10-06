@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\SelectedTeam;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +11,11 @@ use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        $this->app->scoped(SelectedTeam::class);
+    }
+
     /**
      * Bootstrap any application services.
      */
