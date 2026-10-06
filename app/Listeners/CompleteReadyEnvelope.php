@@ -54,11 +54,15 @@ final class CompleteReadyEnvelope implements ShouldQueueAfterCommit, SystemAutho
                 || $signers->contains(fn (Signer $signer) => $signer->status !== SignerStatus::Signed)) {
                 return;
             }
-            DB::statement("SET LOCAL witness.envelope_transition = 'on'");
-            DB::table('envelopes')->where('id', $event->envelopeId)->update([
-                'status' => EnvelopeStatus::CompletionFailed->value,
-                'updated_at' => now(),
-            ]);
+            try {
+                DB::statement("SET LOCAL witness.envelope_transition = 'on'");
+                DB::table('envelopes')->where('id', $event->envelopeId)->update([
+                    'status' => EnvelopeStatus::CompletionFailed->value,
+                    'updated_at' => now(),
+                ]);
+            } finally {
+                DB::statement("SET LOCAL witness.envelope_transition = 'off'");
+            }
         });
     }
 }

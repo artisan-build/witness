@@ -167,9 +167,14 @@ it('marks an exhausted fully signed completion failed and retries without changi
         ->post(route('sender.envelopes.retry-completion', $envelope))
         ->assertSessionHasErrors('completion')
         ->assertSessionMissing('status');
-    resolve(CompleteReadyEnvelope::class)->failed(new EnvelopeReadyForCompletion((int) $envelope->getKey()), new RuntimeException('secret detail'));
+    $transitionCapability = DB::transaction(function () use ($envelope): string {
+        resolve(CompleteReadyEnvelope::class)->failed(new EnvelopeReadyForCompletion((int) $envelope->getKey()), new RuntimeException('secret detail'));
+
+        return (string) DB::scalar("SELECT current_setting('witness.envelope_transition', true)");
+    });
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::CompletionFailed)
-        ->and($envelope->auditEvents()->count())->toBe($count);
+        ->and($envelope->auditEvents()->count())->toBe($count)
+        ->and($transitionCapability)->toBe('off');
 
     $peer = UserFactory::new()->create();
     $envelope->team->users()->attach($peer);
@@ -321,6 +326,34 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
     Storage::assertMissing($finalPath);
     resolve(BrokersEvents::class)->replay();
     expect(PendingFileDeletion::query()->count())->toBe(0);
+});
+
+it('requires the distinct confirmation step and explicit destructive submission before purging', function (): void {
+    [$envelope] = createSigningEnvelope([FieldType::Signature]);
+    $originalPath = $envelope->document->storage_path;
+    $this->actingAsVersioned($envelope->sender)->withSession(['witness.team_id' => $envelope->team_id]);
+
+    $this->get(route('sender.envelopes.delete', $envelope))->assertConflict();
+    expect(Envelope::query()->whereKey($envelope)->exists())->toBeTrue()
+        ->and(Storage::exists($originalPath))->toBeTrue();
+
+    resolve(VoidEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey(), 'Delete through HTTP');
+    $this->get(route('sender.envelopes.delete', $envelope))
+        ->assertOk()
+        ->assertSee('data-testid="delete-envelope-confirmation"', false)
+        ->assertSee(route('sender.envelopes.destroy', $envelope), false);
+
+    $this->delete(route('sender.envelopes.destroy', $envelope))
+        ->assertSessionHasErrors('confirmation');
+    $this->delete(route('sender.envelopes.destroy', $envelope), ['confirmation' => 'delete'])
+        ->assertSessionHasErrors('confirmation');
+    expect(Envelope::query()->whereKey($envelope)->exists())->toBeTrue()
+        ->and(Storage::exists($originalPath))->toBeTrue();
+
+    $this->delete(route('sender.envelopes.destroy', $envelope), ['confirmation' => 'DELETE'])
+        ->assertRedirect(route('sender.dashboard'));
+    expect(Envelope::query()->whereKey($envelope)->exists())->toBeFalse()
+        ->and(Storage::exists($originalPath))->toBeFalse();
 });
 
 it('admits only an installation admin and uses either configured default mailer for test mail', function (string $mailer, string $label): void {
