@@ -18,12 +18,12 @@
                     <flux:input name="name" label="Template name" :value="$template->name" required />
                     <flux:input name="title" label="Envelope title" :value="$template->title" required />
                     <flux:textarea name="message" label="Default message" rows="4">{{ $template->message }}</flux:textarea>
-                    <flux:button type="submit" variant="primary">Save details</flux:button>
+                    <button class="witness-button" type="submit">Save details</button>
                 </form>
                 <form method="POST" action="{{ route('sender.templates.document.update', $template) }}" enctype="multipart/form-data" class="witness-inline-form">
                     @csrf
                     @method('PUT')
-                    <flux:input type="file" name="document" label="Replace PDF" accept="application/pdf,.pdf" required />
+                    <label>Replace PDF<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required></label>
                     <flux:button type="submit">Replace</flux:button>
                 </form>
             </section>
@@ -97,7 +97,7 @@
                                 </template>
                             </div>
                         </div>
-                        <flux:button type="submit" variant="primary">Save placements</flux:button>
+                        <button class="witness-button" type="submit">Save placements</button>
                     </form>
                 @else
                     <p>Add roles before placing fields.</p>

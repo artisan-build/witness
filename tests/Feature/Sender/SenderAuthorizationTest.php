@@ -58,6 +58,11 @@ it('neutrally denies every sender record route across sender and selected-team b
         ['PUT', route('sender.envelopes.fields', $envelope), ['fields_json' => '[]']],
         ['POST', route('sender.envelopes.send', $envelope), []],
         ['POST', route('sender.envelopes.signers.resend-link', [$envelope, $fixture['signer']]), []],
+        ['POST', route('sender.envelopes.void', $envelope), ['reason' => 'No longer needed']],
+        ['POST', route('sender.envelopes.retry-completion', $envelope), []],
+        ['POST', route('sender.envelopes.deliveries.resend', [$envelope, 1]), ['confirm_duplicate_risk' => '1']],
+        ['GET', route('sender.envelopes.delete', $envelope), []],
+        ['DELETE', route('sender.envelopes.destroy', $envelope), ['confirmation' => 'DELETE']],
         ['POST', route('sender.envelopes.template', $envelope), ['name' => 'Stolen template']],
         ['GET', route('sender.envelopes.document.show', $envelope), []],
         ['GET', route('sender.templates.edit', $template), []],
@@ -91,6 +96,7 @@ it('neutrally denies every sender record route across sender and selected-team b
                 'GET' => $this->get($uri),
                 'PUT' => $this->put($uri, $data),
                 'POST' => $this->post($uri, $data),
+                'DELETE' => $this->delete($uri, $data),
             })->assertNotFound();
         }
     }

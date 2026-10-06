@@ -34,6 +34,7 @@ final class EnvelopeEditor extends Component
                     ->orderBy('position'),
                 'fields',
                 'auditEvents',
+                'mailDeliveries',
             ])
             ->findOrFail($this->envelopeId);
 

@@ -133,7 +133,7 @@ it('rejects builder relation and parent cascade changes to a frozen envelope', f
         ->and(fn () => DB::transaction(fn () => Signer::query()->whereKey($signer)->delete()))
         ->toThrow(QueryException::class, 'cannot be removed after send')
         ->and(fn () => DB::transaction(fn () => Envelope::query()->whereKey($envelope)->delete()))
-        ->toThrow(QueryException::class, 'Only draft envelopes');
+        ->toThrow(QueryException::class, 'Only the scoped destructive domain action may delete this envelope');
 
     expect($field->fresh())->not->toBeNull()
         ->and($signer->fresh())->not->toBeNull();
@@ -195,7 +195,7 @@ it('rejects cross-team ownership at model creation', function (): void {
         ->toThrow(DomainException::class, 'must belong');
 });
 
-it('enforces actor identity and rejects unimplemented lifecycle events', function (): void {
+it('enforces actor identity and rejects reminded events outside the active lifecycle', function (): void {
     [$team, $sender, $envelope] = createSecurityEnvelope();
     $otherEnvelope = Envelope::factory()->create();
     $otherSigner = Signer::factory()->for($otherEnvelope)->create();
@@ -212,7 +212,7 @@ it('enforces actor identity and rejects unimplemented lifecycle events', functio
             AuditEventType::Reminded,
             AuditActorType::Sender,
             $sender->getKey(),
-        ))->toThrow(DomainException::class, 'not implemented');
+        ))->toThrow(DomainException::class, 'active sent envelope');
 
     expect(VerbEvent::query()->count())->toBe(0)
         ->and(AuditEvent::query()->count())->toBe(0);

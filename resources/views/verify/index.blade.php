@@ -4,6 +4,10 @@
         <h1>Verify a completed PDF</h1>
         <p>Upload a completed PDF from Witness. The file is hashed for this request and is not stored.</p>
 
+        @error('verification_document')
+            <p role="alert" data-testid="verify-error">{{ $message }}</p>
+        @enderror
+
         <form method="post" action="{{ route('verify.store') }}" enctype="multipart/form-data" class="signing-form">
             @csrf
             <label for="verification_document">Completed PDF</label>

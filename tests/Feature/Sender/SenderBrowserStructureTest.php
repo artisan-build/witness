@@ -36,7 +36,7 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     $role = $template->roles()->create(['label' => 'Client', 'position' => 0]);
     $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
 
-    $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
+    $envelopeResponse = $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
         ->get(route('sender.envelopes.edit', $envelope))
         ->assertOk()
         ->assertSee('data-testid="field-placement"', false)
@@ -52,14 +52,35 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('data-flux-button', false)
         ->assertSee('build/assets/sender.js');
 
+    $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
+        ->assertSee('<button class="witness-button" type="submit" data-testid="save-fields">Save placements</button>', false)
+        ->assertSee('<button class="witness-button witness-button-full" type="submit" data-testid="send-envelope">Send and freeze</button>', false)
+        ->assertSee('<input class="witness-file-input" type="file"', false);
+
     $this->get(route('sender.templates.edit', $template))
         ->assertOk()
         ->assertSee('wire:name="sender.template-editor"', false)
         ->assertSee('data-testid="template-field-placement"', false)
         ->assertSee('x-data="witnessPlacement', false)
-        ->assertSee('data-flux-button', false);
+        ->assertSee('data-flux-button', false)
+        ->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
+        ->assertSee('<button class="witness-button" type="submit">Save placements</button>', false)
+        ->assertSee('<input class="witness-file-input" type="file"', false);
+
+    $this->get(route('sender.envelopes.create'))
+        ->assertOk()
+        ->assertSee('<input class="witness-file-input" type="file"', false);
+
+    $this->get(route('sender.templates.create'))
+        ->assertOk()
+        ->assertSee('<input class="witness-file-input" type="file"', false);
 
     $senderScript = (string) file_get_contents(public_path('build/assets/sender.js'));
+    $senderStyles = (string) file_get_contents(public_path('build/assets/sender.css'));
+    $dashboardView = (string) file_get_contents(resource_path('views/sender/dashboard.blade.php'));
+    $setupView = (string) file_get_contents(resource_path('views/sender/setup.blade.php'));
+    $deleteView = (string) file_get_contents(resource_path('views/sender/envelopes/delete.blade.php'));
+    $envelopeView = (string) file_get_contents(resource_path('views/livewire/sender/envelope-editor.blade.php'));
     $canvasWidth = strpos($senderScript, 'this.$refs.canvas.width = viewport.width;');
     $canvasHeight = strpos($senderScript, 'this.$refs.canvas.height = viewport.height;');
     $render = strpos($senderScript, 'const renderTask = page.render({ canvasContext: context, viewport });');
@@ -75,6 +96,24 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->and($senderScript)->not->toContain('this.pdf')
         ->and($senderScript)->toContain('const page = await pdfDocument.getPage(this.currentPage);')
         ->and($senderScript)->toContain('const renderTask = page.render({ canvasContext: context, viewport });')
+        ->and($senderStyles)->toContain('input.witness-file-input::file-selector-button')
+        ->and($senderStyles)->toContain('background:var(--w-rust)')
+        ->and($senderStyles)->toContain('.witness-select')
+        ->and($senderStyles)->toContain('.witness-status-completion_failed')
+        ->and($senderStyles)->toContain('.witness-status-completed')
+        ->and($senderStyles)->toContain('.witness-status-declined')
+        ->and($senderStyles)->toContain('.witness-status-voided')
+        ->and($senderStyles)->toContain('.witness-status-expired')
+        ->and($dashboardView)->toContain('<select class="witness-select"', '<button class="witness-button" type="submit">Filter</button>')
+        ->and($setupView)->toContain('<button class="witness-button" type="submit">Send me a test email</button>')
+        ->and($deleteView)->toContain('<button class="witness-button" type="submit">Permanently delete</button>')
+        ->and($envelopeView)->toContain(
+            '<button class="witness-button witness-button-small" type="submit">Resend link</button>',
+            '<button class="witness-button" type="submit">Void envelope</button>',
+            '<button class="witness-button" type="submit">Retry completion</button>',
+            '<button class="witness-button" type="submit">Create a new delivery generation</button>',
+            '<button class="witness-button" type="submit">Issue fresh final-document link</button>',
+        )
         ->and($canvasWidth)->toBeInt()
         ->and($canvasHeight)->toBeInt()
         ->and($render)->toBeInt();

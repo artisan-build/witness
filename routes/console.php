@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\EnvelopeCompletionService;
+use App\Services\EnvelopeLifecycleService;
 use App\Services\OutboundMailDelivery;
 use App\Services\PdfDocumentService;
 use ArtisanBuild\BuiltForCloud\SystemAuthoritySchedule;
@@ -13,6 +14,7 @@ Artisan::command('inspire', function (): void {
 })->purpose('Display an inspiring quote');
 
 resolve(SystemAuthoritySchedule::class)->call(Schedule::getFacadeRoot(), function (): void {
+    resolve(EnvelopeLifecycleService::class)->runDue();
     resolve(PdfDocumentService::class)->retryPending();
     resolve(OutboundMailDelivery::class)->reconcileStaleClaims();
     resolve(EnvelopeCompletionService::class)->dispatchReady();

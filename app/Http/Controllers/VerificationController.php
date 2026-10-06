@@ -21,7 +21,7 @@ final class VerificationController
     public function store(Request $request): View
     {
         $validated = $request->validate([
-            'verification_document' => ['required', File::types(['pdf'])->max(32 * 1024)],
+            'verification_document' => ['required', File::types(['pdf'])->max(20 * 1024)],
         ]);
         $upload = $validated['verification_document'];
         $path = $upload->getRealPath();

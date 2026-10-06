@@ -24,7 +24,7 @@ final class VerifySigningCode
             $envelope = Envelope::query()->lockForUpdate()->findOrFail($boundSigner->envelope_id);
             $signer = Signer::query()->lockForUpdate()->findOrFail($boundSigner->getKey());
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || $signer->link_token_hash === null
                 || $signer->otp_hash === null
                 || $signer->otp_expires_at === null

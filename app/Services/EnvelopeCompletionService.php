@@ -15,7 +15,11 @@ use App\Events\EnvelopeReadyForCompletion;
 use App\Mail\CompletedDocument;
 use App\Models\Envelope;
 use App\Models\MailDelivery;
+use App\Models\Signer;
+use App\Models\Team;
+use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Mail\Mailables\Address;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -103,7 +107,69 @@ final readonly class EnvelopeCompletionService
         return $bytes <= self::ATTACHMENT_LIMIT;
     }
 
-    private function deliverPending(int $envelopeId): void
+    public function resendUnknown(Team $team, User $sender, int $envelopeId, int $deliveryId): void
+    {
+        $replacement = DB::transaction(function () use ($team, $sender, $envelopeId, $deliveryId): MailDelivery {
+            $envelope = Envelope::query()
+                ->forTeam($team)
+                ->where('sender_id', $sender->getKey())
+                ->lockForUpdate()
+                ->findOrFail($envelopeId);
+            $delivery = MailDelivery::query()->where('envelope_id', $envelopeId)->findOrFail($deliveryId);
+            if ($delivery->signer_id !== null) {
+                Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);
+            }
+            $delivery = MailDelivery::query()->where('envelope_id', $envelopeId)->lockForUpdate()->findOrFail($deliveryId);
+            if ($envelope->status !== EnvelopeStatus::Completed
+                || $delivery->purpose !== MailDeliveryPurpose::FinalDocument
+                || $delivery->status !== MailDeliveryStatus::Unknown) {
+                throw new \DomainException('Only an unknown final-document handoff can be deliberately resent.');
+            }
+
+            return $this->mailDelivery->createFinalGeneration($delivery);
+        });
+
+        $this->deliverPending($envelopeId, $replacement->getKey());
+    }
+
+    public function reissueSent(Team $team, User $sender, int $envelopeId, int $deliveryId): bool
+    {
+        $replacement = DB::transaction(function () use ($team, $sender, $envelopeId, $deliveryId): MailDelivery {
+            $envelope = Envelope::query()
+                ->forTeam($team)
+                ->where('sender_id', $sender->getKey())
+                ->lockForUpdate()
+                ->findOrFail($envelopeId);
+            $candidate = MailDelivery::query()
+                ->where('envelope_id', $envelopeId)
+                ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+                ->findOrFail($deliveryId);
+            if ($candidate->signer_id !== null) {
+                Signer::query()->lockForUpdate()->findOrFail($candidate->signer_id);
+            }
+            $latest = MailDelivery::query()
+                ->where('envelope_id', $envelopeId)
+                ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
+                ->where('recipient_kind', $candidate->recipient_kind)
+                ->where('recipient_email', $candidate->recipient_email)
+                ->orderByDesc('generation')
+                ->lockForUpdate()
+                ->firstOrFail();
+            if ($envelope->status !== EnvelopeStatus::Completed
+                || $latest->getKey() !== $candidate->getKey()
+                || $latest->status !== MailDeliveryStatus::Sent) {
+                throw new \DomainException('Only the latest successful final-document delivery can receive a fresh link.');
+            }
+
+            return $this->mailDelivery->createFinalGeneration($latest);
+        });
+
+        $this->deliverPending($envelopeId, $replacement->getKey());
+
+        return $replacement->fresh()->status === MailDeliveryStatus::Sent;
+    }
+
+    private function deliverPending(int $envelopeId, ?int $onlyDeliveryId = null): void
     {
         $envelope = Envelope::query()->with(['document', 'sender'])->findOrFail($envelopeId);
         $document = $envelope->document;
@@ -117,6 +183,7 @@ final readonly class EnvelopeCompletionService
             ->where('envelope_id', $envelopeId)
             ->where('purpose', MailDeliveryPurpose::FinalDocument->value)
             ->where('status', MailDeliveryStatus::Pending->value)
+            ->when($onlyDeliveryId !== null, fn ($query) => $query->whereKey($onlyDeliveryId))
             ->orderBy('id')
             ->each(function (MailDelivery $delivery) use ($envelope, $document): void {
                 $path = $document->final_storage_path;
@@ -135,7 +202,7 @@ final readonly class EnvelopeCompletionService
                     $document,
                     $delivery,
                     self::attachesFinal(strlen($bytes)),
-                    URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]),
+                    URL::temporarySignedRoute('final.recipient.download', now()->addDays(7), ['delivery' => $delivery->getKey()]),
                 );
                 $mailable->render();
                 $pendingMail = Mail::mailer((string) config('mail.default'))->to($recipient);

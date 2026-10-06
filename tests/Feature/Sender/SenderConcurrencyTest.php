@@ -284,3 +284,132 @@ it('keeps only the committed object after overlapping envelope and template repl
         }
     }
 });
+
+it('allows only one completion recovery worker to win the locked transition', function (): void {
+    $setup = senderRaceConnection();
+    $locker = senderRaceConnection();
+    $suffix = bin2hex(random_bytes(6));
+    $userId = $teamId = $envelopeId = null;
+
+    try {
+        $statement = $setup->prepare('INSERT INTO users (name, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) RETURNING id');
+        $statement->execute(['Completion race sender', "completion-race-{$suffix}@example.test"]);
+        $userId = (int) $statement->fetchColumn();
+        $statement = $setup->prepare('INSERT INTO teams (name, created_at, updated_at) VALUES (?, NOW(), NOW()) RETURNING id');
+        $statement->execute(["Completion race {$suffix}"]);
+        $teamId = (int) $statement->fetchColumn();
+        $setup->prepare('INSERT INTO team_user (team_id, user_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())')->execute([$teamId, $userId]);
+        $statement = $setup->prepare("INSERT INTO envelopes (team_id, sender_id, title, status, created_at, updated_at) VALUES (?, ?, 'Completion race', 'draft', NOW(), NOW()) RETURNING id");
+        $statement->execute([$teamId, $userId]);
+        $envelopeId = (int) $statement->fetchColumn();
+        $setup->prepare("INSERT INTO documents (envelope_id, original_name, storage_path, size_bytes, page_count, original_sha256, created_at, updated_at) VALUES (?, 'race.pdf', ?, 100, 1, ?, NOW(), NOW())")
+            ->execute([$envelopeId, "documents/completion-race-{$suffix}.pdf", hash('sha256', $suffix)]);
+        $setup->prepare("INSERT INTO signers (envelope_id, name, email, status, position, signed_at, created_at, updated_at) VALUES (?, 'Race signer', ?, 'signed', 0, NOW(), NOW(), NOW())")
+            ->execute([$envelopeId, "completion-signer-{$suffix}@example.test"]);
+        $setup->beginTransaction();
+        $setup->exec("SET LOCAL witness.envelope_transition = 'on'");
+        $setup->prepare("UPDATE envelopes SET status = 'completion_failed', sent_at = NOW() WHERE id = ?")->execute([$envelopeId]);
+        $setup->commit();
+
+        $locker->beginTransaction();
+        $locker->prepare('SELECT id FROM envelopes WHERE id = ? FOR UPDATE')->execute([$envelopeId]);
+        $first = startSenderOperation('completion-retry', $teamId, $userId, $envelopeId);
+        $second = startSenderOperation('completion-retry', $teamId, $userId, $envelopeId);
+        Sleep::usleep(250000);
+        expect($first->isRunning())->toBeTrue()->and($second->isRunning())->toBeTrue();
+        $locker->commit();
+
+        $results = [finishSenderOperation($first), finishSenderOperation($second)];
+        $statuses = collect($results)->pluck('status')->sort()->values()->all();
+        expect($statuses)->toBe(['completed', 'refused']);
+        $statement = $setup->prepare('SELECT status FROM envelopes WHERE id = ?');
+        $statement->execute([$envelopeId]);
+        expect($statement->fetchColumn())->toBe('sent');
+    } finally {
+        if ($locker->inTransaction()) {
+            $locker->rollBack();
+        }
+        if ($envelopeId !== null) {
+            $setup->beginTransaction();
+            $setup->exec("SET LOCAL witness.envelope_transition = 'on'");
+            $setup->prepare("UPDATE envelopes SET status = 'draft' WHERE id = ?")->execute([$envelopeId]);
+            $setup->commit();
+        }
+        if ($teamId !== null) {
+            $setup->prepare('DELETE FROM teams WHERE id = ?')->execute([$teamId]);
+        }
+        if ($userId !== null) {
+            $setup->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
+        }
+    }
+});
+
+it('serializes scheduled expiry and owner void to one terminal lifecycle result', function (): void {
+    $setup = senderRaceConnection();
+    $locker = senderRaceConnection();
+    $suffix = bin2hex(random_bytes(6));
+    $userId = $teamId = $envelopeId = null;
+
+    try {
+        $statement = $setup->prepare('INSERT INTO users (name, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) RETURNING id');
+        $statement->execute(['Lifecycle race sender', "lifecycle-race-{$suffix}@example.test"]);
+        $userId = (int) $statement->fetchColumn();
+        $statement = $setup->prepare('INSERT INTO teams (name, created_at, updated_at) VALUES (?, NOW(), NOW()) RETURNING id');
+        $statement->execute(["Lifecycle race {$suffix}"]);
+        $teamId = (int) $statement->fetchColumn();
+        $setup->prepare('INSERT INTO team_user (team_id, user_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())')->execute([$teamId, $userId]);
+        $statement = $setup->prepare("INSERT INTO envelopes (team_id, sender_id, title, status, expires_at, created_at, updated_at) VALUES (?, ?, 'Lifecycle race', 'draft', NOW() - INTERVAL '1 day', NOW(), NOW()) RETURNING id");
+        $statement->execute([$teamId, $userId]);
+        $envelopeId = (int) $statement->fetchColumn();
+        $setup->prepare("INSERT INTO documents (envelope_id, original_name, storage_path, size_bytes, page_count, original_sha256, created_at, updated_at) VALUES (?, 'race.pdf', ?, 100, 1, ?, NOW(), NOW())")
+            ->execute([$envelopeId, "documents/lifecycle-race-{$suffix}.pdf", hash('sha256', $suffix)]);
+        $statement = $setup->prepare("INSERT INTO signers (envelope_id, name, email, status, position, created_at, updated_at) VALUES (?, 'Race signer', ?, 'pending', 0, NOW(), NOW()) RETURNING id");
+        $statement->execute([$envelopeId, "lifecycle-signer-{$suffix}@example.test"]);
+        $signerId = (int) $statement->fetchColumn();
+        $setup->prepare("INSERT INTO fields (envelope_id, signer_id, page, type, required, position_x, position_y, width, height, created_at, updated_at) VALUES (?, ?, 1, 'signature', true, 0.1, 0.1, 0.2, 0.1, NOW(), NOW())")
+            ->execute([$envelopeId, $signerId]);
+        expect(finishSenderOperation(startSenderOperation('send', $teamId, $userId, $envelopeId))['status'])->toBe('completed');
+
+        $locker->beginTransaction();
+        $locker->prepare('SELECT id FROM envelopes WHERE id = ? FOR UPDATE')->execute([$envelopeId]);
+        $expiry = startSenderOperation('lifecycle-due', $teamId, $userId, $envelopeId);
+        $void = startSenderOperation('void', $teamId, $userId, $envelopeId);
+        Sleep::usleep(250000);
+        expect($expiry->isRunning())->toBeTrue()->and($void->isRunning())->toBeTrue();
+        $locker->commit();
+
+        $results = [finishSenderOperation($expiry), finishSenderOperation($void)];
+        expect(collect($results)->where('status', 'completed')->count())
+            ->toBeGreaterThanOrEqual(1, json_encode($results, JSON_THROW_ON_ERROR));
+        $statement = $setup->prepare('SELECT status FROM envelopes WHERE id = ?');
+        $statement->execute([$envelopeId]);
+        expect($statement->fetchColumn())->toBeIn(['expired', 'voided']);
+        $statement = $setup->prepare("SELECT COUNT(*) FROM audit_events WHERE envelope_id = ? AND type IN ('expired', 'voided')");
+        $statement->execute([$envelopeId]);
+        expect((int) $statement->fetchColumn())->toBe(1);
+    } finally {
+        if ($locker->inTransaction()) {
+            $locker->rollBack();
+        }
+        if ($envelopeId !== null) {
+            $setup->beginTransaction();
+            $setup->prepare("SELECT set_config('witness.purge_envelope', ?, true)")->execute([(string) $envelopeId]);
+            $statement = $setup->prepare('SELECT verb_event_id FROM audit_events WHERE envelope_id = ?');
+            $statement->execute([$envelopeId]);
+            $eventIds = $statement->fetchAll(PDO::FETCH_COLUMN);
+            $setup->prepare('DELETE FROM audit_events WHERE envelope_id = ?')->execute([$envelopeId]);
+            foreach ($eventIds as $eventId) {
+                $setup->prepare('DELETE FROM verb_state_events WHERE event_id = ?')->execute([$eventId]);
+                $setup->prepare('DELETE FROM verb_events WHERE id = ?')->execute([$eventId]);
+            }
+            $setup->prepare('DELETE FROM envelopes WHERE id = ?')->execute([$envelopeId]);
+            $setup->commit();
+        }
+        if ($teamId !== null) {
+            $setup->prepare('DELETE FROM teams WHERE id = ?')->execute([$teamId]);
+        }
+        if ($userId !== null) {
+            $setup->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
+        }
+    }
+});

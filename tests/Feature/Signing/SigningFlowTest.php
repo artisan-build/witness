@@ -96,7 +96,7 @@ it('completes and stamps every signer field type in the rendered PDF', function 
         ->and($strict->getWarnings())->toBe([])
         ->and($inspector->renderedText(1))->toContain('Alex ) Tj ET q Signer')
         ->toContain(now()->utc()->toDateString())
-        ->toContain('X')
+        ->and($inspector->pageContent(1))->toMatch('/\(\x00;\)\s*Tj/')
         ->and($inspector->renderedText(2))->toContain('Approved ) Tj ET /Name q Q')
         ->and($inspector->clippingRectangles(1))->toHaveCount(3)
         ->and($inspector->clippingRectangles(2))->toHaveCount(1)

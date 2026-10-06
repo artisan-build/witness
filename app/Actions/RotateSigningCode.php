@@ -41,7 +41,7 @@ final readonly class RotateSigningCode
                 $latest = $this->mailDelivery->markStaleClaimUnknown($latest);
             }
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || $signer->status !== SignerStatus::Viewed) {
                 throw new SigningAccessDenied;
             }

@@ -6,7 +6,7 @@
         <form method="POST" action="{{ route('sender.envelopes.store') }}" enctype="multipart/form-data" class="witness-stack">
             @csrf
             <label>Envelope title<input name="title" value="{{ old('title') }}" required maxlength="255"></label>
-            <label>PDF document<input type="file" name="document" accept="application/pdf,.pdf" required data-testid="pdf-upload"></label>
+            <label>PDF document<input class="witness-file-input" type="file" name="document" accept="application/pdf,.pdf" required data-testid="pdf-upload"></label>
             <button class="witness-button" type="submit" data-testid="create-envelope">Create draft</button>
         </form>
     </section>

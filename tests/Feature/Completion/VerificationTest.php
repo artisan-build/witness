@@ -59,6 +59,18 @@ it('prevents storage of verification validation and throttle responses', functio
         ->assertHeader('Cache-Control', 'no-store, private');
 });
 
+it('admits the 20 MiB verification boundary and renders an error above it', function (): void {
+    $this->post(route('verify.store'), [
+        'verification_document' => UploadedFile::fake()->create('boundary.pdf', 20 * 1024, 'application/pdf'),
+    ])->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+
+    $this->from(route('verify.index'))->followingRedirects()->post(route('verify.store'), [
+        'verification_document' => UploadedFile::fake()->create('too-large.pdf', (20 * 1024) + 1, 'application/pdf'),
+    ])->assertOk()
+        ->assertHeader('Cache-Control', 'no-store, private')
+        ->assertSee('data-testid="verify-error"', false);
+});
+
 it('does not resolve a human user and throttles verification by IP', function (): void {
     $user = UserFactory::new()->create();
     config([

@@ -89,7 +89,8 @@ it('commits multi-signer invitation state before handoff and rotates an unknown 
         ->and($deliveries[0]->status)->toBe(MailDeliveryStatus::Unknown)
         ->and($deliveries[1]->status)->toBe(MailDeliveryStatus::Sent)
         ->and($secondSigner->fresh()->link_token_hash)->not->toBe($oldHash)
-        ->and($envelope->auditEvents()->where('type', AuditEventType::EmailSent)->count())->toBe(2);
+        ->and($envelope->auditEvents()->where('type', AuditEventType::EmailSent)->count())->toBe(1)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Reminded)->count())->toBe(1);
     Mail::assertSent(SigningInvitation::class, 1);
 });
 
@@ -317,7 +318,7 @@ it('lets the owning sender rotate links for sent non-terminal signers and refuse
         ->assertSeeText('Resend link');
     $this->post(route('sender.envelopes.signers.resend-link', [$envelope, $signer]))
         ->assertRedirect()
-        ->assertSessionHas('status', 'A new signing link was sent.');
+        ->assertSessionHas('status', 'A new signing link was handed to the configured mailer.');
     $secondHash = $signer->fresh()->link_token_hash;
     expect($secondHash)->not->toBe($oldHash)
         ->and($signer->mailDeliveries()

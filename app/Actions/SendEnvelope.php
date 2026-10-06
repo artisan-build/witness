@@ -87,6 +87,7 @@ final readonly class SendEnvelope
             DB::table('envelopes')->where('id', $envelope->getKey())->update([
                 'status' => EnvelopeStatus::Sent,
                 'sent_at' => now(),
+                'expires_at' => $envelope->expires_at ?? now()->addDays(30),
                 'updated_at' => now(),
             ]);
             DB::statement("SET LOCAL witness.envelope_transition = 'off'");

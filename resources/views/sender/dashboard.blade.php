@@ -8,12 +8,24 @@
         <a class="witness-button" href="{{ route('sender.envelopes.create') }}" data-testid="new-envelope">Send a PDF</a>
     </header>
 
+    <form method="GET" action="{{ route('sender.dashboard') }}" class="witness-inline-form" data-testid="status-filter">
+        <label for="status">Status</label>
+        <select class="witness-select" id="status" name="status">
+            <option value="">All</option>
+            @foreach (\App\Enums\EnvelopeStatus::cases() as $option)
+                <option value="{{ $option->value }}" @selected($status === $option->value)>{{ str($option->value)->replace('_', ' ')->title() }}</option>
+            @endforeach
+        </select>
+        <button class="witness-button" type="submit">Filter</button>
+    </form>
+
     <section class="witness-list" data-testid="envelope-list">
         @forelse ($envelopes as $envelope)
             <a class="witness-list-item" href="{{ route('sender.envelopes.edit', $envelope) }}">
                 <div>
                     <strong>{{ $envelope->title }}</strong>
                     <span>{{ $envelope->signers->count() }} {{ Str::plural('signer', $envelope->signers->count()) }}</span>
+                    <span>{{ $envelope->signers->map(fn ($signer) => $signer->name.': '.$signer->status->value)->join(' · ') }}</span>
                 </div>
                 <span class="witness-status witness-status-{{ $envelope->status->value }}">{{ ucfirst($envelope->status->value) }}</span>
             </a>

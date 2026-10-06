@@ -40,7 +40,7 @@ final readonly class OpenSigningLink
             $envelope = Envelope::query()->with('sender')->lockForUpdate()->findOrFail($candidate->envelope_id);
             $signer = Signer::query()->lockForUpdate()->findOrFail($candidate->getKey());
 
-            if ($envelope->status !== EnvelopeStatus::Sent
+            if ($envelope->status !== EnvelopeStatus::Sent || $envelope->expires_at?->isPast()
                 || ($envelope->expires_at !== null && $envelope->expires_at->isPast())
                 || $signer->link_token_hash === null
                 || ! hash_equals($signer->link_token_hash, $tokenHash)

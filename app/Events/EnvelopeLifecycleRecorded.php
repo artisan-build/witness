@@ -148,6 +148,9 @@ class EnvelopeLifecycleRecorded extends Event
             AuditEventType::FieldCompleted,
             AuditEventType::Signed,
             AuditEventType::Declined,
+            AuditEventType::Reminded,
+            AuditEventType::Voided,
+            AuditEventType::Expired,
             AuditEventType::Completed => $this->assert(
                 $state->status === EnvelopeStatus::Sent->value,
                 'Signing events require an active sent envelope.',
@@ -156,7 +159,6 @@ class EnvelopeLifecycleRecorded extends Event
                 $state->status === EnvelopeStatus::Completed->value,
                 'Final delivery events require a completed envelope.',
             ),
-            default => throw new LogicException('Unsupported lifecycle event reached Verbs validation.'),
         };
     }
 
@@ -174,6 +176,14 @@ class EnvelopeLifecycleRecorded extends Event
 
         if ($this->type === AuditEventType::Declined) {
             $state->status = EnvelopeStatus::Declined->value;
+        }
+
+        if ($this->type === AuditEventType::Voided) {
+            $state->status = EnvelopeStatus::Voided->value;
+        }
+
+        if ($this->type === AuditEventType::Expired) {
+            $state->status = EnvelopeStatus::Expired->value;
         }
 
         if ($this->type === AuditEventType::Completed) {

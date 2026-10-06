@@ -35,7 +35,7 @@ final class UpdateFieldResponse
                 ->lockForUpdate()
                 ->findOrFail($field->getKey());
 
-            if ($lockedEnvelope->status !== EnvelopeStatus::Sent
+            if ($lockedEnvelope->status !== EnvelopeStatus::Sent || $lockedEnvelope->expires_at?->isPast()
                 || $lockedSigner->status === SignerStatus::Signed
                 || $lockedSigner->status === SignerStatus::Declined
                 || (int) $lockedSigner->envelope_id !== (int) $lockedEnvelope->getKey()
