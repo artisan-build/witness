@@ -298,7 +298,11 @@ final readonly class EnvelopeController
 
     public function retryCompletion(Request $request, int $envelope): RedirectResponse
     {
-        $this->retryCompletion->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+        try {
+            $this->retryCompletion->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['completion' => $exception->getMessage()]);
+        }
 
         return back()->with('status', 'Completion retry queued.');
     }
@@ -306,8 +310,12 @@ final readonly class EnvelopeController
     public function resendUnknown(Request $request, int $envelope, int $delivery): RedirectResponse
     {
         $request->validate(['confirm_duplicate_risk' => ['accepted']]);
-        $this->findEnvelope($this->user($request), $envelope);
-        $this->completion->resendUnknown($envelope, $delivery);
+        $this->completion->resendUnknown(
+            $this->selectedTeam->get(),
+            $this->user($request),
+            $envelope,
+            $delivery,
+        );
 
         return back()->with('status', 'A new final-document delivery generation was attempted.');
     }

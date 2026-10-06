@@ -23,16 +23,16 @@ final class RetryEnvelopeCompletion
             $envelope = Envelope::query()->forTeam($team)->where('sender_id', $sender->getKey())->lockForUpdate()->findOrFail($envelopeId);
             $document = Document::query()->where('envelope_id', $envelopeId)->lockForUpdate()->firstOrFail();
             $signers = Signer::query()->where('envelope_id', $envelopeId)->orderBy('id')->lockForUpdate()->get();
-            if ($envelope->status === EnvelopeStatus::Sent && $document->final_storage_path === null
-                && $signers->isNotEmpty() && $signers->doesntContain(fn (Signer $signer) => $signer->status !== SignerStatus::Signed)) {
-                return;
-            }
             if ($envelope->status !== EnvelopeStatus::CompletionFailed || $document->final_storage_path !== null
                 || $signers->isEmpty() || $signers->contains(fn (Signer $signer) => $signer->status !== SignerStatus::Signed)) {
                 throw new DomainException('This envelope is not ready for completion recovery.');
             }
-            DB::statement("SET LOCAL witness.envelope_transition = 'on'");
-            DB::table('envelopes')->where('id', $envelopeId)->update(['status' => EnvelopeStatus::Sent->value, 'updated_at' => now()]);
+            try {
+                DB::statement("SET LOCAL witness.envelope_transition = 'on'");
+                DB::table('envelopes')->where('id', $envelopeId)->update(['status' => EnvelopeStatus::Sent->value, 'updated_at' => now()]);
+            } finally {
+                DB::statement("SET LOCAL witness.envelope_transition = 'off'");
+            }
             DB::afterCommit(fn () => event(new EnvelopeReadyForCompletion($envelopeId)));
         });
     }

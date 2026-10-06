@@ -16,6 +16,8 @@ use App\Mail\CompletedDocument;
 use App\Models\Envelope;
 use App\Models\MailDelivery;
 use App\Models\Signer;
+use App\Models\Team;
+use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -105,10 +107,14 @@ final readonly class EnvelopeCompletionService
         return $bytes <= self::ATTACHMENT_LIMIT;
     }
 
-    public function resendUnknown(int $envelopeId, int $deliveryId): void
+    public function resendUnknown(Team $team, User $sender, int $envelopeId, int $deliveryId): void
     {
-        $replacement = DB::transaction(function () use ($envelopeId, $deliveryId): MailDelivery {
-            $envelope = Envelope::query()->lockForUpdate()->findOrFail($envelopeId);
+        $replacement = DB::transaction(function () use ($team, $sender, $envelopeId, $deliveryId): MailDelivery {
+            $envelope = Envelope::query()
+                ->forTeam($team)
+                ->where('sender_id', $sender->getKey())
+                ->lockForUpdate()
+                ->findOrFail($envelopeId);
             $delivery = MailDelivery::query()->where('envelope_id', $envelopeId)->findOrFail($deliveryId);
             if ($delivery->signer_id !== null) {
                 Signer::query()->lockForUpdate()->findOrFail($delivery->signer_id);

@@ -3,18 +3,24 @@
 declare(strict_types=1);
 
 use App\Actions\DeclineEnvelope;
+use App\Actions\RetryEnvelopeCompletion;
 use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
+use App\Actions\VoidEnvelope;
+use App\Events\EnvelopeReadyForCompletion;
 use App\Http\Controllers\EnvelopeController;
 use App\Http\Controllers\TemplateController;
 use App\Models\Signer;
 use App\Models\Team;
+use App\Services\EnvelopeLifecycleService;
 use App\Support\SelectedTeam;
+use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
 use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Event;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 require dirname(__DIR__, 2).'/vendor/autoload.php';
@@ -31,6 +37,9 @@ Auth::login($user);
 resolve(SelectedTeam::class)->set($team);
 
 try {
+    if ($operation === 'completion-retry') {
+        Event::fake([EnvelopeReadyForCompletion::class]);
+    }
     match ($operation) {
         'send' => resolve(SendEnvelope::class)->handle($team, $user, (int) $recordId),
         'sign' => resolve(SignEnvelope::class)->handle(
@@ -43,6 +52,16 @@ try {
             (string) ($data['reason'] ?? 'Declined during concurrency test'),
             '192.0.2.44',
             'Concurrent signing test',
+        ),
+        'completion-retry' => resolve(RetryEnvelopeCompletion::class)->handle($team, $user, (int) $recordId),
+        'lifecycle-due' => resolve(SystemAuthorityContext::class)->run(
+            fn () => resolve(EnvelopeLifecycleService::class)->runDue(),
+        ),
+        'void' => resolve(VoidEnvelope::class)->handle(
+            $team,
+            $user,
+            (int) $recordId,
+            (string) ($data['reason'] ?? 'Voided during concurrency test'),
         ),
         'envelope-fields' => resolve(EnvelopeController::class)->updateFields(
             requestFor($user, ['fields_json' => json_encode($data, JSON_THROW_ON_ERROR)]),

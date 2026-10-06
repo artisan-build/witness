@@ -39,8 +39,12 @@ final class VoidEnvelope
             }
 
             EnvelopeLifecycleRecorded::record($envelope, AuditEventType::Voided, AuditActorType::Sender, $sender->getKey(), payload: ['reason' => $reason]);
-            DB::statement("SET LOCAL witness.envelope_transition = 'on'");
-            DB::table('envelopes')->where('id', $envelopeId)->update(['status' => EnvelopeStatus::Voided->value, 'updated_at' => now()]);
+            try {
+                DB::statement("SET LOCAL witness.envelope_transition = 'on'");
+                DB::table('envelopes')->where('id', $envelopeId)->update(['status' => EnvelopeStatus::Voided->value, 'updated_at' => now()]);
+            } finally {
+                DB::statement("SET LOCAL witness.envelope_transition = 'off'");
+            }
 
             return [$envelope->refresh()->load('sender'), true];
         });
