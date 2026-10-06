@@ -78,7 +78,7 @@ final readonly class EnvelopeController
             throw $exception;
         }
 
-        return redirect()->route('sender.envelopes.edit', $envelope)->with('status', 'Draft created. Add signers and fields.');
+        return to_route('sender.envelopes.edit', $envelope)->with('status', 'Draft created. Add signers and fields.');
     }
 
     public function edit(Request $request, int $envelope): View
@@ -315,7 +315,7 @@ final readonly class EnvelopeController
             throw $exception;
         }
 
-        return redirect()->route('sender.templates.edit', $template)->with('status', 'Template created from the draft.');
+        return to_route('sender.templates.edit', $template)->with('status', 'Template created from the draft.');
     }
 
     /** @return Builder<Envelope> */

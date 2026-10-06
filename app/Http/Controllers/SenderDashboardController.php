@@ -10,6 +10,6 @@ final class SenderDashboardController
 {
     public function __invoke(): RedirectResponse
     {
-        return redirect()->route('sender.dashboard');
+        return to_route('sender.dashboard');
     }
 }

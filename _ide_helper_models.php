@@ -201,6 +201,7 @@ namespace App\Models{
  * @property \Carbon\CarbonImmutable|null $signed_at
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
+ * @property int $position
  * @property-read \App\Models\Envelope $envelope
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Field> $fields
  * @property-read int|null $fields_count
@@ -218,6 +219,7 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpExpiresAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpHash($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpLockedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer wherePosition($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereRoleLabel($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereSignedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereStatus($value)

@@ -73,7 +73,7 @@ final readonly class TemplateController
             throw $exception;
         }
 
-        return redirect()->route('sender.templates.edit', $template)->with('status', 'Template created. Add roles and fields.');
+        return to_route('sender.templates.edit', $template)->with('status', 'Template created. Add roles and fields.');
     }
 
     public function edit(Request $request, int $template): View
@@ -294,7 +294,7 @@ final readonly class TemplateController
             throw $exception;
         }
 
-        return redirect()->route('sender.envelopes.edit', $envelope)->with('status', 'Draft created from template. Review it before sending.');
+        return to_route('sender.envelopes.edit', $envelope)->with('status', 'Draft created from template. Review it before sending.');
     }
 
     /** @return Builder<Template> */

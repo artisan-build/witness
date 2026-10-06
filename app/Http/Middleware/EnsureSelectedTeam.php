@@ -57,7 +57,7 @@ final readonly class EnsureSelectedTeam
         }
 
         if ($team === null) {
-            return redirect()->route('sender.teams.select');
+            return to_route('sender.teams.select');
         }
 
         $this->selectedTeam->set($team);

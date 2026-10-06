@@ -31,7 +31,7 @@ final class TeamSelectionController
 
         $request->session()->put('witness.team_id', $team->getKey());
 
-        return redirect()->route('sender.dashboard');
+        return to_route('sender.dashboard');
     }
 
     private function user(Request $request): User
