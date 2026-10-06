@@ -22,27 +22,66 @@ final class LifecyclePolicy
         $this->assertSupported($type);
         $this->assertActor($envelope, $actorType, $actorId);
 
-        if ($actorType !== AuditActorType::Sender) {
-            throw new DomainException("The {$type->value} event requires the envelope sender.");
-        }
-
         $envelope->refresh();
 
-        if ($envelope->status !== EnvelopeStatus::Sent) {
-            throw new DomainException('PR1 lifecycle events are recorded only while sending a frozen envelope.');
+        if (in_array($type, [AuditEventType::Created, AuditEventType::Sent], true)) {
+            if ($actorType !== AuditActorType::Sender) {
+                throw new DomainException("The {$type->value} event requires the envelope sender.");
+            }
+
+            if ($envelope->status !== EnvelopeStatus::Sent) {
+                throw new DomainException('Send lifecycle events require a frozen envelope.');
+            }
+
+            $expectedCount = $type === AuditEventType::Created ? 0 : 1;
+
+            if ($envelope->audit_event_count !== $expectedCount) {
+                throw new DomainException("The {$type->value} event is not valid at this audit position.");
+            }
+
+            return;
         }
 
-        $expectedCount = $type === AuditEventType::Created ? 0 : 1;
+        if ($envelope->status !== EnvelopeStatus::Sent) {
+            throw new DomainException('Signing lifecycle events require an active sent envelope.');
+        }
 
-        if ($envelope->audit_event_count !== $expectedCount) {
-            throw new DomainException("The {$type->value} event is not valid at this audit position.");
+        $signerEvents = [
+            AuditEventType::Opened,
+            AuditEventType::CodeSent,
+            AuditEventType::CodeVerified,
+            AuditEventType::CodeFailed,
+            AuditEventType::Consented,
+            AuditEventType::FieldCompleted,
+            AuditEventType::Signed,
+            AuditEventType::Declined,
+        ];
+
+        if (in_array($type, $signerEvents, true) && $actorType !== AuditActorType::Signer) {
+            throw new DomainException("The {$type->value} event requires an envelope signer.");
+        }
+
+        if ($type === AuditEventType::EmailSent && $actorType !== AuditActorType::System) {
+            throw new DomainException('The email_sent event requires the system actor.');
         }
     }
 
     public function assertSupported(AuditEventType $type): void
     {
-        if (! in_array($type, [AuditEventType::Created, AuditEventType::Sent], true)) {
-            throw new DomainException("The {$type->value} lifecycle event is not implemented in PR1.");
+        if (! in_array($type, [
+            AuditEventType::Created,
+            AuditEventType::Sent,
+            AuditEventType::EmailSent,
+            AuditEventType::Opened,
+            AuditEventType::CodeSent,
+            AuditEventType::CodeVerified,
+            AuditEventType::CodeFailed,
+            AuditEventType::Consented,
+            AuditEventType::FieldCompleted,
+            AuditEventType::Signed,
+            AuditEventType::Declined,
+        ], true)) {
+            throw new DomainException("The {$type->value} lifecycle event is not implemented yet.");
         }
     }
 

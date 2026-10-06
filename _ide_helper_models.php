@@ -227,6 +227,11 @@ namespace App\Models{
  * @property \Carbon\CarbonImmutable|null $created_at
  * @property \Carbon\CarbonImmutable|null $updated_at
  * @property int $position
+ * @property \Carbon\CarbonImmutable|null $otp_sent_at
+ * @property \Carbon\CarbonImmutable|null $otp_verified_at
+ * @property \Carbon\CarbonImmutable|null $consented_at
+ * @property \Carbon\CarbonImmutable|null $declined_at
+ * @property string|null $decline_reason
  * @property-read \App\Models\Envelope $envelope
  * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Field> $fields
  * @property-read int|null $fields_count
@@ -234,7 +239,10 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer newModelQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer newQuery()
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer query()
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereConsentedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereCreatedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereDeclineReason($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereDeclinedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereEmail($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereEnvelopeId($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereId($value)
@@ -244,6 +252,8 @@ namespace App\Models{
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpExpiresAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpHash($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpLockedAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpSentAt($value)
+ * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereOtpVerifiedAt($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer wherePosition($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereRoleLabel($value)
  * @method static \Illuminate\Database\Eloquent\Builder<static>|Signer whereSignedAt($value)

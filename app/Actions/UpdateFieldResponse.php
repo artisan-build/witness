@@ -23,17 +23,19 @@ final class UpdateFieldResponse
         ?CarbonInterface $completedAt,
     ): Field {
         return DB::transaction(function () use ($envelope, $signer, $field, $value, $completedAt): Field {
-            $lockedField = Field::query()->lockForUpdate()->findOrFail($field->getKey());
-
-            if ((int) $lockedField->envelope_id !== (int) $envelope->getKey()
-                || (int) $lockedField->signer_id !== (int) $signer->getKey()) {
-                throw new DomainException('A field response must target its signer on a sent envelope.');
-            }
-
             $lockedEnvelope = Envelope::query()->lockForUpdate()->findOrFail($envelope->getKey());
+            $lockedSigner = Signer::query()
+                ->where('envelope_id', $lockedEnvelope->getKey())
+                ->lockForUpdate()
+                ->findOrFail($signer->getKey());
+            $lockedField = Field::query()
+                ->where('envelope_id', $lockedEnvelope->getKey())
+                ->where('signer_id', $lockedSigner->getKey())
+                ->lockForUpdate()
+                ->findOrFail($field->getKey());
 
             if ($lockedEnvelope->status !== EnvelopeStatus::Sent
-                || (int) $signer->envelope_id !== (int) $lockedEnvelope->getKey()
+                || (int) $lockedSigner->envelope_id !== (int) $lockedEnvelope->getKey()
                 || (int) $lockedField->envelope_id !== (int) $lockedEnvelope->getKey()) {
                 throw new DomainException('A field response must target its signer on a sent envelope.');
             }

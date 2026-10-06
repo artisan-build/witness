@@ -4,12 +4,24 @@ declare(strict_types=1);
 
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EnvelopeController;
+use App\Http\Controllers\SigningController;
 use App\Http\Controllers\TeamSelectionController;
 use App\Http\Controllers\TemplateController;
 use App\Http\Middleware\EnsureSelectedTeam;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUiAuthority;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Illuminate\Support\Facades\Route;
+
+Route::middleware('throttle:signing-public')->group(function (): void {
+    Route::get('/sign', [SigningController::class, 'show'])->name('sign.show');
+    Route::post('/sign/code', [SigningController::class, 'verify'])->name('sign.verify');
+    Route::post('/sign/consent', [SigningController::class, 'consent'])->name('sign.consent');
+    Route::get('/sign/document', [SigningController::class, 'document'])->name('sign.document');
+    Route::post('/sign/fields', [SigningController::class, 'saveFields'])->name('sign.fields');
+    Route::post('/sign/complete', [SigningController::class, 'sign'])->name('sign.complete');
+    Route::post('/sign/decline', [SigningController::class, 'decline'])->name('sign.decline');
+    Route::get('/sign/{token}', [SigningController::class, 'open'])->name('sign.open');
+});
 
 Route::middleware([EnsureUiAuthority::class, EnsureUserIsAuthenticated::class])->group(function (): void {
     Route::get('/teams/select', [TeamSelectionController::class, 'index'])->name('sender.teams.select');

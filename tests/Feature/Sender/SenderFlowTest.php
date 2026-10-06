@@ -46,8 +46,8 @@ it('drives the two-signer sender happy path twice and makes duplicate send idemp
         $envelope->refresh();
         expect($envelope->status)->toBe(EnvelopeStatus::Sent)
             ->and($envelope->fields()->get()->map(fn ($field) => $field->type->value)->sort()->values()->all())->toBe(collect(FieldType::cases())->map->value->sort()->values()->all())
-            ->and($envelope->auditEvents()->count())->toBe(2)
-            ->and($envelope->audit_event_count)->toBe(2)
+            ->and($envelope->auditEvents()->count())->toBe(4)
+            ->and($envelope->audit_event_count)->toBe(4)
             ->and(resolve(AuditChainVerifier::class)->verify($envelope)->valid)->toBeTrue();
 
         $this->put(route('sender.envelopes.fields', $envelope), ['fields_json' => '[]'])->assertStatus(409);

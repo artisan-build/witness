@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Actions\DeclineEnvelope;
 use App\Actions\SendEnvelope;
+use App\Actions\SignEnvelope;
 use App\Http\Controllers\EnvelopeController;
 use App\Http\Controllers\TemplateController;
+use App\Models\Signer;
 use App\Models\Team;
 use App\Support\SelectedTeam;
 use ArtisanBuild\BuiltForCloud\User;
@@ -30,6 +33,17 @@ resolve(SelectedTeam::class)->set($team);
 try {
     match ($operation) {
         'send' => resolve(SendEnvelope::class)->handle($team, $user, (int) $recordId),
+        'sign' => resolve(SignEnvelope::class)->handle(
+            Signer::query()->findOrFail((int) $recordId),
+            '192.0.2.44',
+            'Concurrent signing test',
+        ),
+        'decline' => resolve(DeclineEnvelope::class)->handle(
+            Signer::query()->findOrFail((int) $recordId),
+            (string) ($data['reason'] ?? 'Declined during concurrency test'),
+            '192.0.2.44',
+            'Concurrent signing test',
+        ),
         'envelope-fields' => resolve(EnvelopeController::class)->updateFields(
             requestFor($user, ['fields_json' => json_encode($data, JSON_THROW_ON_ERROR)]),
             (int) $recordId,

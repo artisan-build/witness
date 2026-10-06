@@ -59,7 +59,7 @@ function tamperWithAuditEvents(Closure $callback): mixed
     }
 }
 
-it('builds and verifies a real two-event envelope chain through Verbs', function (): void {
+it('builds and verifies the send and invitation envelope chain through Verbs', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
 
     resolve(SendEnvelope::class)->handle(
@@ -73,13 +73,13 @@ it('builds and verifies a real two-event envelope chain through Verbs', function
     $events = $envelope->auditEvents()->get();
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
-    expect($events)->toHaveCount(2)
-        ->and($events->pluck('type')->all())->toBe([AuditEventType::Created, AuditEventType::Sent])
+    expect($events)->toHaveCount(3)
+        ->and($events->pluck('type')->all())->toBe([AuditEventType::Created, AuditEventType::Sent, AuditEventType::EmailSent])
         ->and($events[0]->ip_address)->toBe('203.0.113.42')
         ->and($events[1]->user_agent)->toBe('Witness send test agent')
-        ->and(VerbEvent::query()->count())->toBe(2)
+        ->and(VerbEvent::query()->count())->toBe(3)
         ->and($result->valid)->toBeTrue()
-        ->and($result->chainHead)->toBe($events[1]->hash);
+        ->and($result->chainHead)->toBe($events[2]->hash);
 });
 
 it('fails at canonical event data that was directly tampered with', function (): void {
@@ -102,16 +102,17 @@ it('fails at the first event moved out of sequence', function (): void {
     [$team, $sender, $envelope] = createAuditedEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
     $second = $envelope->auditEvents()->where('sequence', 2)->firstOrFail();
+    $third = $envelope->auditEvents()->where('sequence', 3)->firstOrFail();
 
     tamperWithAuditEvents(
-        fn () => DB::table('audit_events')->where('id', $second->getKey())->update(['sequence' => 3]),
+        fn () => DB::table('audit_events')->where('id', $second->getKey())->update(['sequence' => 4]),
     );
 
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($result->valid)->toBeFalse()
         ->and($result->failingSequence)->toBe(2)
-        ->and($result->failingEventId)->toBe($second->getKey());
+        ->and($result->failingEventId)->toBe($third->getKey());
 });
 
 it('detects predecessor and event hash changes', function (string $column): void {
@@ -154,7 +155,7 @@ it('refuses audit event updates and deletes through the application model', func
         ->toThrow(LogicException::class, 'append-only')
         ->and(fn () => $envelope->auditEvents()->delete())
         ->toThrow(LogicException::class, 'append-only')
-        ->and(AuditEvent::query()->count())->toBe(2);
+        ->and(AuditEvent::query()->count())->toBe(3);
 });
 
 it('defines every PRD audit event type', function (): void {

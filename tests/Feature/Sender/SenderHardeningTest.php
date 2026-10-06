@@ -72,7 +72,7 @@ it('refuses an incomplete draft inside the locked send action', function (): voi
         ->and($envelope->auditEvents()->count())->toBe(0);
 });
 
-it('freezes envelope and signer definitions while preserving signer response columns', function (): void {
+it('freezes envelope definitions and reserves signer progress for domain actions', function (): void {
     [$team, $sender, $envelope, $signer] = createHardenedEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
 
@@ -100,9 +100,11 @@ it('freezes envelope and signer definitions while preserving signer response col
             fn () => Signer::query()->whereKey($signer)->update(['email' => 'changed@example.test']),
         ))->toThrow(QueryException::class, 'frozen after send');
 
-    $signer->fresh()->update(['status' => SignerStatus::Viewed]);
+    expect(fn () => DB::transaction(
+        fn () => Signer::query()->whereKey($signer)->update(['status' => SignerStatus::Viewed]),
+    ))->toThrow(QueryException::class, 'locked domain action');
 
-    expect($signer->fresh()->status)->toBe(SignerStatus::Viewed)
+    expect($signer->fresh()->status)->toBe(SignerStatus::Pending)
         ->and($envelope->fresh()->title)->toBe('Locked agreement');
 });
 

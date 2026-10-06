@@ -1,0 +1,194 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Actions;
+
+use App\Enums\AuditActorType;
+use App\Enums\AuditEventType;
+use App\Enums\EnvelopeStatus;
+use App\Enums\FieldType;
+use App\Events\EnvelopeLifecycleRecorded;
+use App\Exceptions\SigningAccessDenied;
+use App\Models\Envelope;
+use App\Models\Field;
+use App\Models\Signer;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+final class SaveSignerFields
+{
+    /** @param array<string|int, mixed> $responses */
+    public function handle(
+        Signer $boundSigner,
+        #[\SensitiveParameter] array $responses,
+        ?string $ipAddress,
+        ?string $userAgent,
+    ): Signer {
+        $createdPaths = [];
+        $replacedPaths = [];
+
+        try {
+            $signer = DB::transaction(function () use (
+                $boundSigner,
+                $responses,
+                $ipAddress,
+                $userAgent,
+                &$createdPaths,
+                &$replacedPaths,
+            ): Signer {
+                $envelope = Envelope::query()->lockForUpdate()->findOrFail($boundSigner->envelope_id);
+                $signer = Signer::query()->lockForUpdate()->findOrFail($boundSigner->getKey());
+                $fields = Field::query()
+                    ->where('envelope_id', $envelope->getKey())
+                    ->where('signer_id', $signer->getKey())
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+
+                if ($envelope->status !== EnvelopeStatus::Sent
+                    || $signer->consented_at === null
+                    || $signer->otp_verified_at === null) {
+                    throw new SigningAccessDenied;
+                }
+
+                $ownedIds = $fields->modelKeys();
+                foreach (array_keys($responses) as $fieldId) {
+                    if (! ctype_digit((string) $fieldId) || ! in_array((int) $fieldId, $ownedIds, true)) {
+                        throw new SigningAccessDenied;
+                    }
+                }
+
+                foreach ($fields as $field) {
+                    $response = $responses[(string) $field->getKey()] ?? $responses[$field->getKey()] ?? null;
+
+                    if ($field->type !== FieldType::DateSigned && $response === null) {
+                        continue;
+                    }
+
+                    if ($response !== null && ! is_array($response)) {
+                        throw ValidationException::withMessages(['fields' => 'A field response was not valid.']);
+                    }
+
+                    $value = $this->normalize($field, $response ?? [], $createdPaths);
+                    $oldPath = $field->value['path'] ?? null;
+
+                    DB::statement("SET LOCAL witness.field_response_write = 'on'");
+                    Field::query()->whereKey($field)->update([
+                        'value' => json_encode($value, JSON_THROW_ON_ERROR),
+                        'completed_at' => $field->completed_at ?? now(),
+                        'updated_at' => now(),
+                    ]);
+                    DB::statement("SET LOCAL witness.field_response_write = 'off'");
+
+                    if ($field->completed_at === null) {
+                        EnvelopeLifecycleRecorded::record(
+                            $envelope,
+                            AuditEventType::FieldCompleted,
+                            AuditActorType::Signer,
+                            $signer->getKey(),
+                            $ipAddress,
+                            $userAgent,
+                            ['field_id' => $field->getKey(), 'field_type' => $field->type->value],
+                        );
+                    }
+
+                    if (is_string($oldPath) && ($value['path'] ?? null) !== $oldPath) {
+                        $replacedPaths[] = $oldPath;
+                    }
+                }
+
+                return $signer->refresh()->load('fields');
+            });
+        } catch (\Throwable $exception) {
+            foreach ($createdPaths as $path) {
+                Storage::delete($path);
+            }
+
+            throw $exception;
+        }
+
+        foreach ($replacedPaths as $path) {
+            Storage::delete($path);
+        }
+
+        return $signer;
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     * @param  list<string>  $createdPaths
+     * @return array<string, bool|string>
+     */
+    private function normalize(Field $field, array $response, array &$createdPaths): array
+    {
+        return match ($field->type) {
+            FieldType::DateSigned => ['kind' => 'date', 'value' => now()->utc()->toDateString()],
+            FieldType::Text => ['kind' => 'text', 'value' => $this->plainText($response['text'] ?? null, 2000)],
+            FieldType::Checkbox => ['kind' => 'checkbox', 'checked' => filter_var($response['checked'] ?? false, FILTER_VALIDATE_BOOL)],
+            FieldType::Signature, FieldType::Initials => $this->signatureValue($field, $response, $createdPaths),
+        };
+    }
+
+    private function plainText(mixed $value, int $maximum): string
+    {
+        if (! is_string($value)) {
+            throw ValidationException::withMessages(['fields' => 'Enter a value for every completed text field.']);
+        }
+
+        $value = trim($value);
+
+        if ($value === '' || mb_strlen($value) > $maximum || strip_tags($value) !== $value || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value)) {
+            throw ValidationException::withMessages(['fields' => 'A text field contains unsupported content.']);
+        }
+
+        return $value;
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     * @param  list<string>  $createdPaths
+     * @return array<string, string>
+     */
+    private function signatureValue(Field $field, array $response, array &$createdPaths): array
+    {
+        if (($response['kind'] ?? null) === 'typed') {
+            return [
+                'kind' => 'typed',
+                'text' => $this->plainText($response['typed'] ?? null, 100),
+            ];
+        }
+
+        if (($response['kind'] ?? null) !== 'drawn' || ! is_string($response['drawn'] ?? null)) {
+            throw ValidationException::withMessages(['fields' => 'Choose a typed or drawn signature.']);
+        }
+
+        $encoded = $response['drawn'];
+        if (! str_starts_with($encoded, 'data:image/png;base64,')) {
+            throw ValidationException::withMessages(['fields' => 'The drawn signature must be a PNG image.']);
+        }
+
+        $bytes = base64_decode(substr($encoded, 22), true);
+        $dimensions = is_string($bytes) ? @getimagesizefromstring($bytes) : false;
+
+        if (! is_string($bytes)
+            || strlen($bytes) > 512 * 1024
+            || ! str_starts_with($bytes, "\x89PNG\r\n\x1a\n")
+            || $dimensions === false
+            || $dimensions['mime'] !== 'image/png'
+            || $dimensions[0] > 2000
+            || $dimensions[1] > 1000) {
+            throw ValidationException::withMessages(['fields' => 'The drawn signature image is not valid.']);
+        }
+
+        $path = 'signatures/'.$field->envelope_id.'/'.Str::uuid().'.png';
+        if (! Storage::put($path, $bytes)) {
+            throw ValidationException::withMessages(['fields' => 'The drawn signature could not be stored.']);
+        }
+        $createdPaths[] = $path;
+
+        return ['kind' => 'drawn', 'path' => $path, 'sha256' => hash('sha256', $bytes)];
+    }
+}
