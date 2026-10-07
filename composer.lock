@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "0091aa781fcab04ef035606ca33f088f",
+    "content-hash": "76c81fe27970799d392819c60bb3c5ac",
     "packages": [
         {
             "name": "artisan-build/bfc-client",
@@ -187,21 +187,21 @@
         },
         {
             "name": "artisan-build/hone-client",
-            "version": "v1.5.0",
+            "version": "v1.6.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/artisan-build/hone-client.git",
-                "reference": "7ec9f1749adb4c3cc0734d53556d8e7b188fea3c"
+                "reference": "54daa21f4aa840a72c2e16042b5d410d64e57520"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/artisan-build/hone-client/zipball/7ec9f1749adb4c3cc0734d53556d8e7b188fea3c",
-                "reference": "7ec9f1749adb4c3cc0734d53556d8e7b188fea3c",
+                "url": "https://api.github.com/repos/artisan-build/hone-client/zipball/54daa21f4aa840a72c2e16042b5d410d64e57520",
+                "reference": "54daa21f4aa840a72c2e16042b5d410d64e57520",
                 "shasum": ""
             },
             "require": {
                 "artisan-build/bfc-client": "^0.1 || ^0.2",
-                "artisan-build/hone-contracts": "^1.0",
+                "artisan-build/hone-contracts": "^1.6",
                 "illuminate/contracts": "^13.0",
                 "illuminate/support": "^13.0",
                 "laravel/nightwatch": "^1.28",
@@ -238,22 +238,22 @@
                 "telemetry"
             ],
             "support": {
-                "source": "https://github.com/artisan-build/hone-client/tree/v1.5.0"
+                "source": "https://github.com/artisan-build/hone-client/tree/v1.6.0"
             },
-            "time": "2026-09-23T21:26:22+00:00"
+            "time": "2026-10-07T19:21:15+00:00"
         },
         {
             "name": "artisan-build/hone-contracts",
-            "version": "v1.5.0",
+            "version": "v1.6.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/artisan-build/hone-contracts.git",
-                "reference": "db9e9f70af2d093216d8c9893998620b40097681"
+                "reference": "f3ce18181d98668c6bbe7aa734067a573e63f4d8"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/artisan-build/hone-contracts/zipball/db9e9f70af2d093216d8c9893998620b40097681",
-                "reference": "db9e9f70af2d093216d8c9893998620b40097681",
+                "url": "https://api.github.com/repos/artisan-build/hone-contracts/zipball/f3ce18181d98668c6bbe7aa734067a573e63f4d8",
+                "reference": "f3ce18181d98668c6bbe7aa734067a573e63f4d8",
                 "shasum": ""
             },
             "require": {
@@ -282,9 +282,9 @@
                 "telemetry"
             ],
             "support": {
-                "source": "https://github.com/artisan-build/hone-contracts/tree/v1.5.0"
+                "source": "https://github.com/artisan-build/hone-contracts/tree/v1.6.0"
             },
-            "time": "2026-09-23T21:26:26+00:00"
+            "time": "2026-10-07T19:21:20+00:00"
         },
         {
             "name": "aws/aws-crt-php",
