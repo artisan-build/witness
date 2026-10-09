@@ -28,13 +28,13 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         hash('sha256', $pdf),
     );
     $signer = $envelope->signers()->create(['name' => '<script>unsafe</script>', 'email' => 'browser@example.test']);
-    $signer->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .31, 'height' => .09]);
+    $signer->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .314159, 'height' => .092857]);
     $template = Template::factory()->forOwner($team, $user)->create([
         'storage_path' => 'documents/'.$team->getKey().'/template-browser-fixture.pdf',
         'page_count' => 2,
     ]);
     $role = $template->roles()->create(['label' => 'Client', 'position' => 0]);
-    $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .31, 'height' => .09]);
+    $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .314159, 'height' => .092857]);
     $template->roles()->create(['label' => '<script>unsafe-role</script>', 'position' => 1]);
 
     $envelopeResponse = $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
@@ -63,6 +63,8 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     expect($islands->length)->toBe(1)
         ->and($islands->item(0)->textContent)->toContain('0.173456')
         ->toContain('0.234567')
+        ->toContain('0.314159')
+        ->toContain('0.092857')
         ->toContain('\u003Cscript\u003Eunsafe');
 
     $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
@@ -91,6 +93,8 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     expect($templateIslands->length)->toBe(1)
         ->and($templateIslands->item(0)->textContent)->toContain('0.173456')
         ->toContain('0.234567')
+        ->toContain('0.314159')
+        ->toContain('0.092857')
         ->toContain('\u003Cscript\u003Eunsafe-role');
 
     $this->get(route('sender.envelopes.create'))
