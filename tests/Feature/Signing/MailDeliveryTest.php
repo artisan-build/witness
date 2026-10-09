@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Validation\ValidationException;
 
 it('commits multi-signer invitation state before handoff and rotates an unknown generation', function (): void {
     [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
@@ -437,4 +438,48 @@ it('lets the owning sender rotate links for sent non-terminal signers and refuse
     expect($signer->mailDeliveries()
         ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
         ->count())->toBe(3);
+});
+
+it('refuses code rotation for a declined envelope whose expiry is still in the future', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+    $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail()->update(['status' => MailDeliveryStatus::Unknown->value]);
+    DB::transaction(function () use ($envelope): void {
+        DB::statement("SET LOCAL witness.envelope_transition = 'on'");
+        DB::table('envelopes')->where('id', $envelope->getKey())
+            ->update(['status' => EnvelopeStatus::Declined->value, 'updated_at' => now()]);
+        DB::statement("SET LOCAL witness.envelope_transition = 'off'");
+    });
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Declined)
+        ->and($envelope->fresh()->expires_at?->isPast())->toBeFalse()
+        ->and($signer->fresh()->status)->toBe(SignerStatus::Viewed);
+
+    expect(fn () => resolve(RotateSigningCode::class)->handle($signer->refresh(), '192.0.2.31', 'Rotation admission probe'))
+        ->toThrow(SigningAccessDenied::class)
+        ->and($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1);
+});
+
+it('refuses code rotation while the latest delivery is a fresh sending handoff', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+    $hashBefore = $signer->fresh()->otp_hash;
+    $latest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    DB::table('mail_deliveries')->where('id', $latest->getKey())->update(['status' => MailDeliveryStatus::Sending->value, 'attempted_at' => now()]);
+
+    try {
+        resolve(RotateSigningCode::class)->handle($signer->fresh(), '192.0.2.31', 'Rotation admission probe');
+        test()->fail('A fresh in-flight code delivery was rotated anyway.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['code'][0])->toContain('still in progress');
+    }
+
+    expect($signer->fresh()->otp_hash)->toBe($hashBefore)
+        ->and($latest->fresh()->status)->toBe(MailDeliveryStatus::Sending)
+        ->and($signer->fresh()->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1);
+    Mail::assertSent(SigningCode::class, 1);
 });
