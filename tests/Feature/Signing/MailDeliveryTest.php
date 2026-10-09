@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
+use App\Actions\CreateDraftEnvelope;
 
 it('commits multi-signer invitation state before handoff and rotates an unknown generation', function (): void {
     [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
@@ -520,4 +521,136 @@ it('leaves a fresh sending generation and stamps unknown_at on reconciled genera
         ->and($staleSending->fresh()->unknown_at)->not->toBeNull()
         ->and($freshSending->fresh()->status)->toBe(MailDeliveryStatus::Sending)
         ->and($freshSending->fresh()->unknown_at)->toBeNull();
+});
+
+it('refuses sender resends to declined signers without rotating the token', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.decline'), ['reason' => 'No.'])->assertOk();
+    $hashBefore = $signer->fresh()->link_token_hash;
+
+    $this->from(route('sender.envelopes.edit', $envelope))
+        ->actingAsVersioned($envelope->sender)
+        ->withSession(['witness.team_id' => $envelope->team_id])
+        ->post(route('sender.envelopes.signers.resend-link', [$envelope, $signer]))
+        ->assertRedirect(route('sender.envelopes.edit', $envelope))
+        ->assertSessionHasErrors('resend');
+
+    expect($signer->fresh()->link_token_hash)->toBe($hashBefore)
+        ->and($signer->mailDeliveries()
+            ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
+            ->count())->toBe(1);
+});
+
+it('schedules reminders on the anchor interval and stamps last_reminded_at only on the sender path', function (): void {
+    Mail::fake();
+    $team = Team::factory()->create();
+    $owner = UserFactory::new()->create();
+    $team->users()->attach($owner);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $owner,
+        title: 'Scheduled reminder envelope',
+        originalName: 'reminder.pdf',
+        storagePath: 'documents/reminder.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'scheduled reminder document'),
+    );
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['reminder_interval_days' => 7]);
+    $signer = Signer::factory()->for($envelope)->create();
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    resolve(SendEnvelope::class)->handle($team, $owner, $envelope->getKey());
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['last_reminded_at' => now()->subDays(8)]);
+    $token = null;
+    Mail::assertSent(SigningInvitation::class, function (SigningInvitation $mail) use ($signer, &$token): bool {
+        if ($mail->signer->is($signer)) {
+            $token = $mail->linkToken;
+        }
+
+        return $mail->signer->is($signer);
+    });
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+
+    $envelope2 = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $owner,
+        title: 'Fresh reminder envelope',
+        originalName: 'reminder2.pdf',
+        storagePath: 'documents/reminder2.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'fresh reminder document'),
+    );
+    DB::table('envelopes')->where('id', $envelope2->getKey())->update(['reminder_interval_days' => 7]);
+    $signer2 = Signer::factory()->for($envelope2)->create();
+    $signer2->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    resolve(SendEnvelope::class)->handle($team, $owner, $envelope2->getKey());
+    DB::table('envelopes')->where('id', $envelope2->getKey())->update(['last_reminded_at' => now()->subDay()]);
+
+    $envelope3 = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $owner,
+        title: 'Null interval envelope',
+        originalName: 'reminder3.pdf',
+        storagePath: 'documents/reminder3.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'null interval document'),
+    );
+    DB::table('envelopes')->where('id', $envelope3->getKey())->update(['reminder_interval_days' => null]);
+    $signer3 = Signer::factory()->for($envelope3)->create();
+    $signer3->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    resolve(SendEnvelope::class)->handle($team, $owner, $envelope3->getKey());
+
+    $anchorBefore = $envelope->fresh()->last_reminded_at;
+
+    $event = collect(resolve(Schedule::class)->events())->first(
+        fn (mixed $event): bool => $event instanceof CallbackEvent
+            && $event->description === 'witness:cleanup-private-files',
+    );
+    assert($event instanceof CallbackEvent);
+    $event->run(app());
+
+    Mail::assertSent(SigningInvitation::class, 4);
+    expect($signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
+        ->count())->toBe(2)
+        ->and($envelope->fresh()->last_reminded_at?->greaterThan($anchorBefore))->toBeTrue()
+        ->and($envelope3->fresh()->last_reminded_at)->toBeNull();
+
+    $this->from(route('sender.envelopes.edit', $envelope))
+        ->actingAsVersioned($envelope->sender)
+        ->withSession(['witness.team_id' => $envelope->team_id])
+        ->post(route('sender.envelopes.signers.resend-link', [$envelope, $signer]))
+        ->assertRedirect(route('sender.envelopes.edit', $envelope))
+        ->assertSessionHas('status', 'A new signing link was handed to the configured mailer.');
+
+    expect($envelope->fresh()->last_reminded_at?->equalTo($anchorBefore))->toBeFalse()
+        ->and($envelope3->fresh()->last_reminded_at)->toBeNull();
+    Mail::assertSent(SigningInvitation::class, 5);
 });

@@ -776,3 +776,18 @@ it('refuses code rotation while the latest delivery is a fresh sending handoff',
         ->and($signer->fresh()->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode)->count())->toBe(1);
     Mail::assertSent(SigningCode::class, 1);
 });
+
+it('stamps the durable decline exactly once', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.decline'), ['reason' => 'No.'])->assertOk();
+
+    expect($signer->fresh()->declined_at)->not->toBeNull()
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Declined)->count())->toBe(1);
+
+    $this->post(route('sign.decline'), ['reason' => 'Again.'])->assertOk();
+
+    expect($envelope->auditEvents()->where('type', AuditEventType::Declined)->count())->toBe(1)
+        ->and($signer->fresh()->decline_reason)->toBe('No.')
+        ->and($signer->fresh()->declined_at)->not->toBeNull();
+});
