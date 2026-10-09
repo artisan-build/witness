@@ -175,6 +175,11 @@ it('rejects ownership and container moves through instance and builder paths', f
             $tampered->status = EnvelopeStatus::Sent;
             $tampered->save();
         })->toThrow(DomainException::class, 'require a domain action')
+        ->and(function () use ($envelopeA, $senderB): void {
+            $tampered = $envelopeA->fresh();
+            $tampered->sender_id = $senderB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'require a domain action')
         ->and(function () use ($signer, $envelopeB): void {
             $tampered = $signer->fresh();
             $tampered->envelope_id = $envelopeB->getKey();
