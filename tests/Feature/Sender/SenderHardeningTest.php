@@ -124,6 +124,14 @@ it('freezes every signer definition column and refuses model-level removal after
         ->toThrow(DomainException::class, 'cannot be changed after send');
 });
 
+it('freezes the envelope message at the model rung after send', function (): void {
+    [$team, $sender, $envelope, $signer] = createHardenedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect(fn () => $envelope->fresh()->update(['message' => 'Changed message']))
+        ->toThrow(DomainException::class, 'cannot be changed after send');
+});
+
 it('returns a controlled conflict before storing for a document-less draft', function (): void {
     Storage::fake('local');
     $user = UserFactory::new()->create();
