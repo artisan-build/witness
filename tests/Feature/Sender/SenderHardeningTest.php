@@ -24,6 +24,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\PdfFixture;
 
+/**
+ * Creates a team, sender, draft envelope, signer, and required signature field.
+ * Pass `complete: false` to skip the signer, field, and audit-seeding steps — the
+ * returned envelope has NO signer at all, so tests must create their own.
+ */
 function createHardenedEnvelope(bool $complete = true): array
 {
     $team = Team::factory()->create();
