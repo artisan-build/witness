@@ -127,4 +127,11 @@ it('scopes sender final downloads and serves signed recipient links privately', 
     $signedUrl = URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]);
     $this->get($signedUrl)->assertOk()->assertHeader('Content-Type', 'application/pdf');
     $this->get(route('final.recipient.download', $delivery))->assertForbidden();
+
+    Storage::put($envelope->document->fresh()->final_storage_path, 'tampered bytes after completion');
+    $this->actingAsVersioned($owner)
+        ->withSession(['witness.team_id' => $team->getKey()])
+        ->get($route)
+        ->assertNotFound();
+    $this->get($signedUrl)->assertNotFound();
 });
