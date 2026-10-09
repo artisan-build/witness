@@ -332,7 +332,8 @@ it('detects empty and tail-truncated chains against envelope anchors', function 
     expect($tailResult->valid)->toBeFalse()
         ->and($tailResult->reason)->toContain('Expected 3 audit events')
         ->and($emptyResult->valid)->toBeFalse()
-        ->and($emptyResult->reason)->toContain('no audit chain');
+        ->and($emptyResult->reason)->toContain('no audit chain')
+        ->and($emptyResult->failingSequence)->toBe(1);
 });
 
 it('keeps inherited lifecycle commit paths out of application use', function (): void {

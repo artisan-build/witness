@@ -179,6 +179,7 @@ it('rejects a fully consistent forged chain that does not begin with created', f
     $result = resolve(AuditChainVerifier::class)->verify($envelope);
 
     expect($result->valid)->toBeFalse()
+        ->and($result->failingSequence)->toBe(1)
         ->and($result->reason)->toContain('must begin with created');
 });
 
