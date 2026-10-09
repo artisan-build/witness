@@ -33,9 +33,12 @@ it('reconciles the signer roster: swaps addresses, re-applies order, deletes omi
         ['id' => $original->get('first@example.test'), 'name' => 'First Renamed', 'email' => 'second@example.test'],
     ]])->assertRedirect();
 
-    $roster = $envelope->signers()->orderBy('position')->get();
-    expect($roster->pluck('email')->all())->toBe(['first@example.test', 'second@example.test'])
-        ->and($roster->pluck('name')->all())->toBe(['Second Renamed', 'First Renamed'])
+    $roster = $envelope->signers()->get();
+    expect($roster->pluck('position', 'email')->all())->toBe([
+        'first@example.test' => 0,
+        'second@example.test' => 1,
+    ])
+        ->and($roster->sortBy('position')->pluck('name')->all())->toBe(['Second Renamed', 'First Renamed'])
         ->and($roster->where('email', 'first@example.test')->first()->getKey())->toBe($original->get('second@example.test'))
         ->and($envelope->signers()->where('email', 'like', '%@invalid.test')->count())->toBe(0);
 
