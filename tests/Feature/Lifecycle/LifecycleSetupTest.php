@@ -26,6 +26,7 @@ use App\Models\PendingFileDeletion;
 use App\Models\Team;
 use App\Services\EnvelopeCompletionService;
 use App\Services\EnvelopeLifecycleService;
+use App\Services\OutboundMailDelivery;
 use App\Services\PdfDocumentService;
 use App\States\EnvelopeState;
 use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
@@ -303,6 +304,30 @@ it('never automatically retries an unknown final handoff and creates an explicit
         ->toBe([MailDeliveryStatus::Unknown, MailDeliveryStatus::Sent]);
 });
 
+it('refuses deliberately resending a final-document delivery that is not an unknown handoff', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.field_response_write = 'on'");
+        DB::table('fields')->where('signer_id', $signer->getKey())->update([
+            'value' => json_encode(['kind' => 'typed', 'text' => 'Alex Signer'], JSON_THROW_ON_ERROR),
+            'completed_at' => now(),
+        ]);
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        DB::table('signers')->where('id', $signer->getKey())->update(['status' => SignerStatus::Signed->value, 'signed_at' => now()]);
+    });
+    resolve(EnvelopeCompletionService::class)->complete((int) $envelope->getKey());
+    $sent = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->sole();
+    $before = $signer->mailDeliveries()->count();
+
+    expect(fn () => resolve(EnvelopeCompletionService::class)->resendUnknown(
+        $envelope->team,
+        $envelope->sender,
+        (int) $envelope->getKey(),
+        (int) $sent->getKey(),
+    ))->toThrow(DomainException::class, 'Only an unknown final-document handoff')
+        ->and($signer->mailDeliveries()->count())->toBe($before);
+});
+
 it('lets only the selected-team owning sender reissue the latest successful final-document link', function (): void {
     [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
     DB::transaction(function () use ($signer): void {
@@ -353,6 +378,34 @@ it('lets only the selected-team owning sender reissue the latest successful fina
             (int) $delivery->getKey(),
         ))->toThrow(DomainException::class)
         ->and($signer->mailDeliveries()->count())->toBe(3);
+});
+
+it('refuses reissuing when the latest final-document generation is not a successful handoff', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.field_response_write = 'on'");
+        DB::table('fields')->where('signer_id', $signer->getKey())->update([
+            'value' => json_encode(['kind' => 'typed', 'text' => 'Alex Signer'], JSON_THROW_ON_ERROR),
+            'completed_at' => now(),
+        ]);
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        DB::table('signers')->where('id', $signer->getKey())->update(['status' => SignerStatus::Signed->value, 'signed_at' => now()]);
+    });
+    resolve(EnvelopeCompletionService::class)->complete((int) $envelope->getKey());
+    $sent = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->sole();
+
+    $pending = resolve(OutboundMailDelivery::class)->createFinalGeneration($sent);
+    expect($pending->fresh()->status)->toBe(MailDeliveryStatus::Pending)
+        ->and($pending->fresh()->generation)->toBe(2);
+
+    expect(fn () => resolve(EnvelopeCompletionService::class)->reissueSent(
+        $envelope->team,
+        $envelope->sender,
+        (int) $envelope->getKey(),
+        (int) $pending->getKey(),
+    ))->toThrow(DomainException::class, 'Only the latest successful final-document delivery')
+        ->and($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->orderBy('generation')->pluck('status')->all())
+        ->toBe([MailDeliveryStatus::Sent, MailDeliveryStatus::Pending]);
 });
 
 it('purges a terminal aggregate and all private and Verbs material under the exact envelope setting', function (): void {
