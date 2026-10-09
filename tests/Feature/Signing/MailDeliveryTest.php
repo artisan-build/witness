@@ -26,6 +26,7 @@ use Illuminate\Mail\PendingMail;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 
 it('commits multi-signer invitation state before handoff and rotates an unknown generation', function (): void {
     [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
@@ -131,6 +132,55 @@ it('marks an ambiguous OTP handoff unknown and requires route-level code rotatio
         ->and($signer->fresh()->otp_hash)->not->toBe($firstHash)
         ->and($envelope->auditEvents()->where('type', AuditEventType::CodeSent)->count())->toBe(1);
     Mail::assertSent(SigningCode::class, fn (SigningCode $mail): bool => Hash::check($mail->code, $signer->fresh()->otp_hash));
+});
+
+it('refuses code rotation while the latest delivery is not an unknown handoff', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $firstHash = $signer->fresh()->otp_hash;
+    expect($signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail()->status)->toBe(MailDeliveryStatus::Sent);
+
+    $this->post(route('sign.code.rotate'))->assertRedirect()->assertSessionHasErrors('code');
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1)
+        ->and($signer->fresh()->otp_hash)->toBe($firstHash)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::CodeSent)->count())->toBe(1);
+});
+
+it('refuses a fourth code rotation under the per-signer issue throttle', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail()->update(['status' => MailDeliveryStatus::Unknown]);
+    $firstHash = $signer->fresh()->otp_hash;
+    $signerKey = 'sign-code-signer:'.$signer->getKey();
+    RateLimiter::hit($signerKey, 600);
+    RateLimiter::hit($signerKey, 600);
+    RateLimiter::hit($signerKey, 600);
+
+    $this->post(route('sign.code.rotate'))->assertRedirect()->assertSessionHasErrors('code');
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1)
+        ->and($signer->fresh()->otp_hash)->toBe($firstHash)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::CodeSent)->count())->toBe(1);
+});
+
+it('refuses code rotation for a signer that is no longer viewable', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail()->update(['status' => MailDeliveryStatus::Unknown]);
+    $firstHash = $signer->fresh()->otp_hash;
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update(['status' => SignerStatus::Signed, 'signed_at' => now()]);
+    });
+
+    $this->post(route('sign.code.rotate'))->assertOk()->assertSee('data-testid="signer-neutral"', false);
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1)
+        ->and($signer->fresh()->otp_hash)->toBe($firstHash);
 });
 
 it('keeps a failed decline notification unknown without a retry seam and renders truthful status', function (): void {
