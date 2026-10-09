@@ -372,3 +372,18 @@ it('deletes the stored png when a sibling field fails validation in the same sav
     expect(Storage::allFiles('signatures'))->toHaveCount(1)
         ->and(Storage::allFiles('signatures'))->not->toBe($filesAfterFirstSave);
 });
+
+it('skips untouched blank signature controls without aborting sibling saves', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature, FieldType::Text]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+    $fields = $signer->fields()->orderBy('id')->get();
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[0]->getKey() => ['kind' => 'drawn', 'drawn' => ''],
+        $fields[1]->getKey() => ['kind' => 'text', 'text' => 'Typed value'],
+    ]])->assertRedirect();
+
+    expect($fields[1]->fresh()->value['value'])->toBe('Typed value')
+        ->and($fields[0]->fresh()->value)->toBeNull();
+});
