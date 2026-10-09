@@ -164,7 +164,37 @@ it('rejects ownership and container moves through instance and builder paths', f
                 'team_id' => $teamB->getKey(),
                 'sender_id' => $senderB->getKey(),
             ]),
-        ))->toThrow(QueryException::class, 'immutable');
+        ))->toThrow(QueryException::class, 'immutable')
+        ->and(function () use ($envelopeA, $teamB): void {
+            $tampered = $envelopeA->fresh();
+            $tampered->team_id = $teamB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'require a domain action')
+        ->and(function () use ($envelopeA): void {
+            $tampered = $envelopeA->fresh();
+            $tampered->status = EnvelopeStatus::Sent;
+            $tampered->save();
+        })->toThrow(DomainException::class, 'require a domain action')
+        ->and(function () use ($signer, $envelopeB): void {
+            $tampered = $signer->fresh();
+            $tampered->envelope_id = $envelopeB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'Signer envelope identity is immutable')
+        ->and(function () use ($templateA, $teamB): void {
+            $tampered = $templateA->fresh();
+            $tampered->team_id = $teamB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'Template team and sender are immutable')
+        ->and(function () use ($role, $templateB): void {
+            $tampered = $role->fresh();
+            $tampered->template_id = $templateB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'Template role parent is immutable')
+        ->and(function () use ($templateField, $templateB): void {
+            $tampered = $templateField->fresh();
+            $tampered->template_id = $templateB->getKey();
+            $tampered->save();
+        })->toThrow(DomainException::class, 'Template field container identity is immutable');
 
     expect($field->fresh()->envelope_id)->toBe($envelopeA->getKey())
         ->and($templateField->fresh()->template_id)->toBe($templateA->getKey());
