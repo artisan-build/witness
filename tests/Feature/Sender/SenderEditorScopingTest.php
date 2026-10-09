@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 use App\Livewire\Sender\EnvelopeEditor;
 use App\Livewire\Sender\TemplateEditor;
+use App\Models\Envelope;
+use App\Models\Team;
+use App\Models\Template;
 use App\Support\SelectedTeam;
+use ArtisanBuild\BuiltForCloud\User;
 use Database\Factories\UserFactory;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
@@ -13,9 +17,9 @@ use Livewire\Livewire;
  * Re-creates the selected-team context a real request gets from
  * EnsureSelectedTeam, scoped to this test's lifecycle.
  */
-function selectEditorTeam(App\Models\Team $team): void
+function selectEditorTeam(Team $team): void
 {
-    app(SelectedTeam::class)->set($team);
+    resolve(SelectedTeam::class)->set($team);
 }
 
 /**
@@ -23,18 +27,18 @@ function selectEditorTeam(App\Models\Team $team): void
  * teamB the owner also belongs to, plus an envelope and a template owned
  * by the owner in teamA.
  *
- * @return array{owner: ArtisanBuild\BuiltForCloud\User, peer: ArtisanBuild\BuiltForCloud\User, teamA: App\Models\Team, teamB: App\Models\Team, envelope: App\Models\Envelope, template: App\Models\Template, other: App\Models\Envelope}
+ * @return array{owner: User, peer: User, teamA: Team, teamB: Team, envelope: Envelope, template: Template, other: Envelope}
  */
 function editorScopingFixture(): array
 {
     $owner = UserFactory::new()->create();
     $peer = UserFactory::new()->create();
-    $teamA = App\Models\Team::factory()->create(['name' => 'Editor team A']);
-    $teamB = App\Models\Team::factory()->create(['name' => 'Editor team B']);
+    $teamA = Team::factory()->create(['name' => 'Editor team A']);
+    $teamB = Team::factory()->create(['name' => 'Editor team B']);
     $teamA->users()->attach([$owner->getKey(), $peer->getKey()]);
     $teamB->users()->attach($owner);
 
-    $envelope = App\Models\Envelope::factory()->forOwner($teamA, $owner)->create(['title' => 'Owner envelope']);
+    $envelope = Envelope::factory()->forOwner($teamA, $owner)->create(['title' => 'Owner envelope']);
     $signer = $envelope->signers()->create([
         'name' => 'Editor signer',
         'email' => 'editor-signer@example.test',
@@ -49,10 +53,10 @@ function editorScopingFixture(): array
         'height' => .1,
     ]);
 
-    $template = App\Models\Template::factory()->forOwner($teamA, $owner)->create(['name' => 'Owner template']);
+    $template = Template::factory()->forOwner($teamA, $owner)->create(['name' => 'Owner template']);
     $template->roles()->create(['label' => 'Client', 'position' => 0]);
 
-    $other = App\Models\Envelope::factory()->forOwner($teamA, $owner)->create(['title' => 'Other envelope']);
+    $other = Envelope::factory()->forOwner($teamA, $owner)->create(['title' => 'Other envelope']);
 
     return compact('owner', 'peer', 'teamA', 'teamB', 'envelope', 'template', 'other');
 }
