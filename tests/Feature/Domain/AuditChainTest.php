@@ -7,7 +7,10 @@ use App\Actions\SendEnvelope;
 use App\Domain\Audit\AuditCanonicalizer;
 use App\Domain\Audit\AuditChainVerifier;
 use App\Domain\Audit\AuditHasher;
+use App\Domain\Audit\LifecyclePolicy;
+use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
+use App\Events\EnvelopeLifecycleRecorded;
 use App\Models\AuditEvent;
 use App\Models\Team;
 use App\Support\CanonicalJson;
@@ -262,6 +265,97 @@ it('detects a consistently forged extra audit row against the envelope anchor', 
 
     expect($result->valid)->toBeFalse()
         ->and($result->reason)->toContain('Expected 3 audit events, found 4');
+});
+
+it('appends each new lifecycle event at max sequence plus one and advances the anchor', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    $signer = $envelope->signers()->firstOrFail();
+
+    $recorded = EnvelopeLifecycleRecorded::record(
+        $envelope->refresh(),
+        AuditEventType::Opened,
+        AuditActorType::Signer,
+        (string) $signer->getKey(),
+        '192.0.2.31',
+        'Sequence test agent',
+    );
+
+    $events = $envelope->auditEvents()->orderBy('sequence')->get();
+
+    expect($recorded->sequence)->toBe(4)
+        ->and($events->pluck('sequence')->all())->toBe([1, 2, 3, 4])
+        ->and($recorded->prev_hash)->toBe($events[2]->hash)
+        ->and($envelope->refresh()->audit_event_count)->toBe(4)
+        ->and($envelope->audit_chain_head)->toBe($recorded->hash);
+});
+
+it('appends no second audit row when the same lifecycle event is projected again', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $verbEvent = VerbEvent::query()->orderBy('id')->get()->values()->get(1);
+    $event = $verbEvent->event();
+    expect($event)->toBeInstanceOf(EnvelopeLifecycleRecorded::class);
+
+    $first = $event->handle(resolve(AuditCanonicalizer::class), resolve(AuditHasher::class), resolve(LifecyclePolicy::class));
+    $second = $event->handle(resolve(AuditCanonicalizer::class), resolve(AuditHasher::class), resolve(LifecyclePolicy::class));
+
+    expect($second->is($first))->toBeTrue()
+        ->and($first->verb_event_id)->toBe($verbEvent->id)
+        ->and(AuditEvent::query()->count())->toBe(3);
+});
+
+it('refuses a lifecycle event whose audit position does not match the envelope anchor', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    $signer = $envelope->signers()->firstOrFail();
+
+    DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['audit_event_count' => 1]);
+
+    expect(fn () => EnvelopeLifecycleRecorded::record(
+        $envelope->refresh(),
+        AuditEventType::Opened,
+        AuditActorType::Signer,
+        (string) $signer->getKey(),
+        '192.0.2.31',
+        'Position test agent',
+    ))->toThrow(DomainException::class, 'anchor is out of sync')
+        ->and(AuditEvent::query()->count())->toBe(3)
+        ->and($envelope->refresh()->audit_event_count)->toBe(1);
+});
+
+it('rebuilds a deleted audit projection in order during replay', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $verbEvents = VerbEvent::query()->orderBy('id')->get();
+
+    tamperWithAuditEvents(function () use ($envelope): void {
+        DB::table('audit_events')->where('envelope_id', $envelope->getKey())->delete();
+    });
+
+    DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+    DB::table('envelopes')->where('id', $envelope->getKey())->update([
+        'audit_event_count' => 0,
+        'audit_chain_head' => null,
+    ]);
+
+    foreach ($verbEvents as $verbEvent) {
+        $event = $verbEvent->event();
+
+        if ($event instanceof EnvelopeLifecycleRecorded) {
+            $event->handle(resolve(AuditCanonicalizer::class), resolve(AuditHasher::class), resolve(LifecyclePolicy::class));
+        }
+    }
+
+    $envelope->refresh();
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
+
+    expect($envelope->auditEvents()->count())->toBe(3)
+        ->and($envelope->audit_event_count)->toBe(3)
+        ->and($result->valid)->toBeTrue();
 });
 
 it('derives genesis from both envelope identity and original document hash', function (): void {
