@@ -438,6 +438,17 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
     expect(PendingFileDeletion::query()->count())->toBe(0);
 });
 
+it('refuses purging an envelope that is not terminal', function (): void {
+    [$envelope] = createSigningEnvelope([FieldType::Signature]);
+    $originalPath = $envelope->document->storage_path;
+
+    expect(fn () => resolve(PurgeEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey()))
+        ->toThrow(DomainException::class, 'Only completed, voided, or declined')
+        ->and(Envelope::query()->whereKey($envelope)->exists())->toBeTrue()
+        ->and(Storage::exists($originalPath))->toBeTrue()
+        ->and(AuditEvent::query()->where('envelope_id', $envelope->getKey())->count())->toBe(3);
+});
+
 it('requires the distinct confirmation step and explicit destructive submission before purging', function (): void {
     [$envelope] = createSigningEnvelope([FieldType::Signature]);
     $originalPath = $envelope->document->storage_path;
