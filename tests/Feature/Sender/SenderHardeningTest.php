@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\CreateDraftEnvelope;
 use App\Actions\SendEnvelope;
 use App\Enums\EnvelopeStatus;
+use App\Enums\FieldType;
 use App\Enums\SignerStatus;
 use App\Models\Envelope;
 use App\Models\PendingFileDeletion;
@@ -67,6 +68,26 @@ it('refuses an incomplete draft inside the locked send action', function (): voi
 
     expect(fn () => resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey()))
         ->toThrow(DomainException::class, 'at least one signer');
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
+        ->and($envelope->auditEvents()->count())->toBe(0);
+
+    $signer = $envelope->signers()->create([
+        'name' => 'Late Signer',
+        'email' => 'late-signer@example.test',
+    ]);
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => FieldType::Text->value,
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .5,
+        'width' => .2,
+        'height' => .05,
+    ]);
+
+    expect(fn () => resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey()))
+        ->toThrow(DomainException::class, 'required signature or initials');
 
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
         ->and($envelope->auditEvents()->count())->toBe(0);
