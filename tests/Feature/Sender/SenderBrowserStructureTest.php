@@ -28,13 +28,13 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         hash('sha256', $pdf),
     );
     $signer = $envelope->signers()->create(['name' => '<script>unsafe</script>', 'email' => 'browser@example.test']);
-    $signer->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
+    $signer->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .31, 'height' => .09]);
     $template = Template::factory()->forOwner($team, $user)->create([
         'storage_path' => 'documents/'.$team->getKey().'/template-browser-fixture.pdf',
         'page_count' => 2,
     ]);
     $role = $template->roles()->create(['label' => 'Client', 'position' => 0]);
-    $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
+    $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .173456, 'position_y' => .234567, 'width' => .31, 'height' => .09]);
     $template->roles()->create(['label' => '<script>unsafe-role</script>', 'position' => 1]);
 
     $envelopeResponse = $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
@@ -44,8 +44,6 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('data-testid="pdf-page-canvas"', false)
         ->assertSee('data-page-next', false)
         ->assertSee('data-field-type="signature"', false)
-        ->assertSee('0.17')
-        ->assertSee('0.23')
         ->assertSee('\\u003Cscript\\u003Eunsafe', false)
         ->assertDontSee('<script>unsafe</script>', false)
         ->assertSee('wire:name="sender.envelope-editor"', false)
@@ -60,6 +58,12 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     foreach (['Replace', 'Add signer', 'Save signers', 'Save as template'] as $label) {
         expect($xpath->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button ") and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
     }
+
+    $islands = $xpath->query('//script[@type="application/json" and @data-placement-data]');
+    expect($islands->length)->toBe(1)
+        ->and($islands->item(0)->textContent)->toContain('0.173456')
+        ->toContain('0.234567')
+        ->toContain('\u003Cscript\u003Eunsafe');
 
     $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
         ->assertSee('<button class="witness-button" type="submit" data-testid="save-fields">Save placements</button>', false)
@@ -82,6 +86,12 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     @$document->loadHTML((string) $templateResponse->getContent());
     $xpath = new DOMXPath($document);
     expect($xpath->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button ") and normalize-space(.)="Replace"]')->length)->toBe(1);
+
+    $templateIslands = $xpath->query('//script[@type="application/json" and @data-placement-data]');
+    expect($templateIslands->length)->toBe(1)
+        ->and($templateIslands->item(0)->textContent)->toContain('0.173456')
+        ->toContain('0.234567')
+        ->toContain('\u003Cscript\u003Eunsafe-role');
 
     $this->get(route('sender.envelopes.create'))
         ->assertOk()
