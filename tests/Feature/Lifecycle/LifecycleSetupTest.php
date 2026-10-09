@@ -412,13 +412,28 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
         ->toThrow(ModelNotFoundException::class)
         ->and(Envelope::query()->whereKey($envelope)->exists())->toBeTrue();
 
+    $real = Storage::disk('local');
+    $deletes = [];
     $failing = Mockery::mock(Storage::disk('local'))->makePartial();
-    $failing->shouldReceive('delete')->with($finalPath)->once()->andReturnFalse();
+    $failing->shouldReceive('delete')->andReturnUsing(function (string $path) use ($real, &$deletes, $finalPath): bool {
+        $deletes[] = $path;
+
+        return $path === $finalPath ? false : $real->delete($path);
+    });
     Storage::set('local', $failing);
 
     resolve(PurgeEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey());
 
-    expect(Envelope::query()->find($envelope->getKey()))->toBeNull()
+    file_put_contents(getenv('HOME').'/b7-disk.txt', print_r([
+        'default_disk' => config('filesystems.default'),
+        'original' => Storage::exists($originalPath),
+        'drawn' => Storage::exists($drawnPath),
+        'final' => Storage::exists($finalPath),
+        'local_all' => Storage::disk('local')->allFiles(),
+    ], true));
+
+    expect($deletes)->toBe([$originalPath, $finalPath, $drawnPath])
+        ->and(Envelope::query()->find($envelope->getKey()))->toBeNull()
         ->and(AuditEvent::query()->where('envelope_id', $envelope->getKey())->count())->toBe(0)
         ->and(DB::table('verb_events')->whereIn('id', $eventIds)->count())->toBe(0)
         ->and(DB::table('verb_state_events')->whereIn('event_id', $eventIds)->count())->toBe(0)
