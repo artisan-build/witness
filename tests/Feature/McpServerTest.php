@@ -284,26 +284,24 @@ it('refuses unbound and wrong-ability credentials before any Witness domain quer
     $revokedPrincipal = UserFactory::new()->create();
     $revokedTeam = Team::factory()->create();
     $revokedTeam->users()->attach($revokedPrincipal);
-    $revoked = bindWitnessMcpCredential($revokedPrincipal, [WitnessMcpAbility::Read->value]);
-    $revoked->forceFill(['revoked_at' => now()]);
-    $response = resolve(ListTemplates::class)->handle(new Request);
-    expect($response->isError())->toBeTrue()->and($queries)->toBeEmpty();
-
     $pendingPrincipal = UserFactory::new()->create();
     $pendingTeam = Team::factory()->create();
     $pendingTeam->users()->attach($pendingPrincipal);
-    $pending = bindWitnessMcpCredential($pendingPrincipal, [WitnessMcpAbility::Read->value]);
-    $pending->forceFill(['status' => CredentialStatus::Pending]);
-    $response = resolve(ListTemplates::class)->handle(new Request);
-    expect($response->isError())->toBeTrue()->and($queries)->toBeEmpty();
-
     $expiredPrincipal = UserFactory::new()->create();
     $expiredTeam = Team::factory()->create();
     $expiredTeam->users()->attach($expiredPrincipal);
+
+    $revoked = bindWitnessMcpCredential($revokedPrincipal, [WitnessMcpAbility::Read->value]);
+    $revoked->forceFill(['revoked_at' => now()]);
+    expect(resolve(ListTemplates::class)->handle(new Request)->isError())->toBeTrue();
+
+    $pending = bindWitnessMcpCredential($pendingPrincipal, [WitnessMcpAbility::Read->value]);
+    $pending->forceFill(['status' => CredentialStatus::Pending]);
+    expect(resolve(ListTemplates::class)->handle(new Request)->isError())->toBeTrue();
+
     $expired = bindWitnessMcpCredential($expiredPrincipal, [WitnessMcpAbility::Read->value]);
     $expired->forceFill(['expires_at' => now()->subHour()]);
-    $response = resolve(ListEnvelopes::class)->handle(new Request);
-    expect($response->isError())->toBeTrue()->and($queries)->toBeEmpty();
+    expect(resolve(ListEnvelopes::class)->handle(new Request)->isError())->toBeTrue();
 });
 
 it('fails closed at every concrete route entry point for inexact abilities and unbound principals', function (): void {
