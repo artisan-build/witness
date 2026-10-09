@@ -35,6 +35,7 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     ]);
     $role = $template->roles()->create(['label' => 'Client', 'position' => 0]);
     $role->fields()->create(['page' => 2, 'type' => 'signature', 'required' => true, 'position_x' => .17, 'position_y' => .23, 'width' => .31, 'height' => .09]);
+    $template->roles()->create(['label' => '<script>unsafe-role</script>', 'position' => 1]);
 
     $envelopeResponse = $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
         ->get(route('sender.envelopes.edit', $envelope))
@@ -70,6 +71,8 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->assertSee('wire:name="sender.template-editor"', false)
         ->assertSee('data-testid="template-field-placement"', false)
         ->assertSee('x-data="witnessPlacement', false)
+        ->assertSee('\u003Cscript\u003Eunsafe-role', false)
+        ->assertDontSee('<script>unsafe-role</script>', false)
         ->assertSee('data-flux-button', false)
         ->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
         ->assertSee('<button class="witness-button" type="submit">Save placements</button>', false)
