@@ -14,6 +14,8 @@ use App\Models\Template;
 use App\Models\TemplateField;
 use App\Models\TemplateRole;
 use Database\Factories\UserFactory;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 it('stores enum-backed statuses and types in ordinary string columns', function (): void {
@@ -117,4 +119,87 @@ it('allows the same signer email on multiple envelopes from one sender', functio
     Signer::factory()->for($second)->create(['email' => 'repeat-signer@example.test']);
 
     expect(Signer::query()->where('email', 'repeat-signer@example.test')->count())->toBe(2);
+});
+
+function createFieldFreezeFixture(): array
+{
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $sender,
+        title: 'Field freeze test',
+        originalName: 'field-freeze.pdf',
+        storagePath: 'documents/field-freeze.pdf',
+        sizeBytes: 4096,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'field freeze test document'),
+    );
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    return [$envelope, $signer, $field];
+}
+
+it('freezes every field definition column after send', function (string $column, mixed $value): void {
+    [$envelope, $signer, $field] = createFieldFreezeFixture();
+
+    expect(fn () => $field->update([$column => $value]))
+        ->toThrow(DomainException::class, 'Fields cannot be changed');
+})->with([
+    'page' => ['page', 2],
+    'type' => ['type', FieldType::Text],
+    'required' => ['required', false],
+    'position_x' => ['position_x', '0.4000000000'],
+    'position_y' => ['position_y', '0.4000000000'],
+    'width' => ['width', '0.4000000000'],
+    'height' => ['height', '0.4000000000'],
+]);
+
+it('binds each field to a signer of its own envelope and refuses container reassignment', function (): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+    $envelopeA = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Field binding A']);
+    $envelopeB = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Field binding B']);
+    $signerA = Signer::factory()->for($envelopeA)->create();
+    $signerB = Signer::factory()->for($envelopeB)->create();
+
+    $mismatched = new Field([
+        'page' => 1,
+        'type' => FieldType::Signature,
+        'required' => true,
+        'position_x' => '0.1000000000',
+        'position_y' => '0.2000000000',
+        'width' => '0.3000000000',
+        'height' => '0.1000000000',
+    ]);
+    $mismatched->signer_id = $signerA->getKey();
+    $mismatched->envelope_id = $envelopeB->getKey();
+
+    $fieldForSignerSwap = Field::factory()->forSigner($signerA)->create();
+    $fieldForEnvelopeSwap = Field::factory()->forSigner($signerA)->create();
+
+    expect(fn () => $mismatched->save())
+        ->toThrow(DomainException::class, 'A field signer must belong to the same envelope.')
+        ->and(fn () => $fieldForSignerSwap->forceFill(['signer_id' => $signerB->getKey()])->save())
+        ->toThrow(DomainException::class, 'Field container identity is immutable.')
+        ->and(fn () => $fieldForEnvelopeSwap->forceFill(['envelope_id' => $envelopeB->getKey()])->save())
+        ->toThrow(DomainException::class, 'Field container identity is immutable.');
+});
+
+it('refuses builder-level field container reassignment', function (): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+    $envelopeA = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Binding recheck']);
+    $envelopeB = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Binding recheck other']);
+    $signerA = Signer::factory()->for($envelopeA)->create();
+    $signerB = Signer::factory()->for($envelopeB)->create();
+    $field = Field::factory()->forSigner($signerA)->create();
+
+    expect(fn () => DB::table('fields')->where('id', $field->getKey())->update(['signer_id' => $signerB->getKey()]))
+        ->toThrow(QueryException::class, 'Field container identity is immutable');
 });
