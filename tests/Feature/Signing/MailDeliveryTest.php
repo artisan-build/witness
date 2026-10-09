@@ -542,7 +542,7 @@ it('refuses sender resends to declined signers without rotating the token', func
             ->count())->toBe(1);
 });
 
-it('schedules reminders on the anchor interval and stamps last_reminded_at only on the sender path', function (): void {
+it('schedules reminders on the anchor interval and stamps last_reminded_at on the schedule and sender paths', function (): void {
     Mail::fake();
     $team = Team::factory()->create();
     $owner = UserFactory::new()->create();
@@ -637,12 +637,14 @@ it('schedules reminders on the anchor interval and stamps last_reminded_at only 
     $event->run(app());
 
     Mail::assertSent(SigningInvitation::class, 4);
+    $afterSchedule = $envelope->fresh()->last_reminded_at;
     expect($signer->mailDeliveries()
         ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
         ->count())->toBe(2)
-        ->and($envelope->fresh()->last_reminded_at?->greaterThan($anchorBefore))->toBeTrue()
+        ->and($afterSchedule?->greaterThan($anchorBefore))->toBeTrue()
         ->and($envelope3->fresh()->last_reminded_at)->toBeNull();
 
+    $this->travel(5)->seconds();
     $this->from(route('sender.envelopes.edit', $envelope))
         ->actingAsVersioned($envelope->sender)
         ->withSession(['witness.team_id' => $envelope->team_id])
@@ -650,7 +652,51 @@ it('schedules reminders on the anchor interval and stamps last_reminded_at only 
         ->assertRedirect(route('sender.envelopes.edit', $envelope))
         ->assertSessionHas('status', 'A new signing link was handed to the configured mailer.');
 
-    expect($envelope->fresh()->last_reminded_at?->equalTo($anchorBefore))->toBeFalse()
+    expect($envelope->fresh()->last_reminded_at?->greaterThan($afterSchedule))->toBeTrue()
         ->and($envelope3->fresh()->last_reminded_at)->toBeNull();
     Mail::assertSent(SigningInvitation::class, 5);
+});
+
+it('does not rotate a scheduled reminder for an envelope without a reminder interval', function (): void {
+    Mail::fake();
+    $team = Team::factory()->create();
+    $owner = UserFactory::new()->create();
+    $team->users()->attach($owner);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $owner,
+        title: 'Null interval scheduled envelope',
+        originalName: 'reminder4.pdf',
+        storagePath: 'documents/reminder4.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'null interval scheduled document'),
+    );
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['reminder_interval_days' => null]);
+    $signer = Signer::factory()->for($envelope)->create();
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    resolve(SendEnvelope::class)->handle($team, $owner, $envelope->getKey());
+    $hash = $signer->fresh()->link_token_hash;
+    $generation = (int) $signer->mailDeliveries()->max('generation');
+    expect($generation)->toBe(1);
+
+    $rotated = resolve(SystemAuthorityContext::class)->run(
+        fn (): bool => resolve(RotateSigningInvitation::class)->handle(
+            $team, null, (int) $envelope->getKey(), (int) $signer->getKey(),
+        ),
+    );
+
+    expect($rotated)->toBeFalse()
+        ->and($signer->fresh()->link_token_hash)->toBe($hash)
+        ->and((int) $signer->mailDeliveries()->max('generation'))->toBe($generation)
+        ->and($envelope->fresh()->last_reminded_at)->toBeNull();
+    Mail::assertSent(SigningInvitation::class, 1);
 });
