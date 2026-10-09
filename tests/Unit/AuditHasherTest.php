@@ -15,37 +15,14 @@ it('compares hashes for equality and refuses different hashes of any length', fu
 
 it('compares through the constant-time hash_equals primitive rather than a short-circuiting operator', function (): void {
     $method = new ReflectionMethod(AuditHasher::class, 'matches');
-    $source = file_get_contents($method->getFileName());
-    $open = strpos($source, '{', (int) strpos($source, 'function matches'));
-    $depth = 0;
-    $close = $open;
-    for ($i = $open, $length = strlen($source); $i < $length; $i++) {
-        if ($source[$i] === '{') {
-            $depth++;
-        }
-        if ($source[$i] === '}') {
-            $depth--;
-            if ($depth === 0) {
-                $close = $i;
-                break;
-            }
-        }
-    }
-    $body = trim(substr($source, $open + 1, $close - $open - 1));
-    $normalized = preg_replace('/\s+/', ' ', $body);
+    $source = implode('', array_slice(
+        file($method->getFileName()),
+        $method->getStartLine() - 1,
+        $method->getEndLine() - $method->getStartLine() + 1,
+    ));
+    $body = trim(substr($source, (int) strpos($source, '{') + 1, strrpos($source, '}') - (int) strpos($source, '{') - 1));
 
-    expect($normalized)->toBe('return hash_equals($knownHash, $calculatedHash);')
-        ->and($body)->not->toContain('===')
-        ->and($body)->not->toContain('!==')
-        ->and($body)->not->toContain('==')
-        ->and($body)->not->toContain('!=')
-        ->and($body)->not->toContain('&&')
-        ->and($body)->not->toContain('||')
-        ->and($body)->not->toContain('?:')
-        ->and($body)->not->toContain(' ? ')
-        ->and($body)->not->toContain('match(')
-        ->and($body)->not->toContain('strlen')
-        ->and($body)->not->toContain('if (');
+    expect(preg_replace('/\s+/', ' ', $body))->toBe('return hash_equals($knownHash, $calculatedHash);');
 });
 
 it('hashes each event over its predecessor hash concatenated with the canonical bytes', function (): void {
