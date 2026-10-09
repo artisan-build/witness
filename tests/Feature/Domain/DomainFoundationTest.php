@@ -56,6 +56,46 @@ it('freezes document and field mutations after send', function (): void {
         ->toThrow(DomainException::class, 'Fields cannot be changed');
 });
 
+it('refuses document deletion and keeps document envelope identity immutable', function (): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $sender,
+        title: 'Delete freeze test',
+        originalName: 'delete-freeze.pdf',
+        storagePath: 'documents/delete-freeze.pdf',
+        sizeBytes: 1024,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'delete freeze document'),
+    );
+
+    $draftDocument = $envelope->document;
+    $signer = Signer::factory()->for($envelope)->create(['email' => 'delete-freeze-signer@example.test']);
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    $draftDocument->envelope_id = $envelope->getKey() + 1;
+
+    expect(fn () => $draftDocument->save())
+        ->toThrow(DomainException::class, 'envelope identity is immutable');
+
+    $draftDocument->refresh();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect(fn () => $envelope->document->delete())
+        ->toThrow(DomainException::class, 'Documents cannot be changed')
+        ->and(fn () => Document::factory()->for($envelope)->create(['original_name' => 'second.pdf']))
+        ->toThrow(DomainException::class, 'Documents cannot be changed');
+});
+
 it('requires explicit distinct-team scoping for envelopes and templates', function (): void {
     $teamA = Team::factory()->create(['name' => 'Team A']);
     $teamB = Team::factory()->create(['name' => 'Team B']);
