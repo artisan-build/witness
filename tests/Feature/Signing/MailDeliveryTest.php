@@ -44,12 +44,14 @@ it('commits multi-signer invitation state before handoff and rotates an unknown 
         'height' => .08,
     ]);
     $mailManager = Mail::getFacadeRoot()->manager;
+    $capturedTokens = [];
 
-    Mail::shouldReceive('to')->twice()->andReturnUsing(function (string $email) use ($firstSigner, $secondSigner): PendingMail {
+    Mail::shouldReceive('to')->twice()->andReturnUsing(function (string $email) use ($firstSigner, $secondSigner, &$capturedTokens): PendingMail {
         $pending = Mockery::mock(PendingMail::class);
         $pending->shouldReceive('send')->once()->andReturnUsing(
-            function (SigningInvitation $mail) use ($email, $firstSigner, $secondSigner): void {
+            function (SigningInvitation $mail) use ($email, $firstSigner, $secondSigner, &$capturedTokens): void {
                 $signer = $email === $firstSigner->email ? $firstSigner : $secondSigner;
+                $capturedTokens[$signer->getKey()] = $mail->linkToken;
                 expect($mail->signer->is($signer))->toBeTrue()
                     ->and($signer->fresh()->link_token_hash)->not->toBeNull()
                     ->and($signer->mailDeliveries()->latest('generation')->firstOrFail()->status)
@@ -69,6 +71,9 @@ it('commits multi-signer invitation state before handoff and rotates an unknown 
         ->and($firstSigner->mailDeliveries()->firstOrFail()->status)->toBe(MailDeliveryStatus::Sent)
         ->and($secondSigner->mailDeliveries()->firstOrFail()->status)->toBe(MailDeliveryStatus::Unknown)
         ->and($envelope->auditEvents()->where('type', AuditEventType::EmailSent)->count())->toBe(1)
+        ->and($firstSigner->fresh()->link_token_hash)->not->toBe($secondSigner->fresh()->link_token_hash)
+        ->and($firstSigner->fresh()->link_token_hash)->toBe(hash('sha256', $capturedTokens[$firstSigner->getKey()]))
+        ->and($secondSigner->fresh()->link_token_hash)->toBe(hash('sha256', $capturedTokens[$secondSigner->getKey()]))
         ->and(fn () => resolve(SendEnvelope::class)->handle(
             $envelope->team,
             $envelope->sender,
