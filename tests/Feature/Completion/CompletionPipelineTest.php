@@ -206,6 +206,26 @@ it('runs the queued completion listener inside system authority', function (): v
         ->and(resolve(SystemAuthorityContext::class)->active())->toBeFalse();
 });
 
+it('returns the existing final document when completion is replayed on a completed envelope', function (): void {
+    [$envelope, $signer, $completed] = completeFixtureEnvelope('classic-1.4-letter.pdf');
+    $document = $envelope->document;
+    $completedEvents = fn (): int => (int) DB::table('audit_events')
+        ->where('envelope_id', $envelope->getKey())->where('type', 'completed')->count();
+    $deliveries = fn (): int => (int) DB::table('mail_deliveries')
+        ->where('envelope_id', $envelope->getKey())->count();
+    $before = [$completedEvents(), $deliveries()];
+
+    $replayed = resolve(StoreFinalDocument::class)->handle(
+        $envelope->refresh(),
+        (string) $document->final_storage_path,
+        (string) $document->final_sha256,
+    );
+
+    expect($replayed->is($document->refresh()))->toBeTrue()
+        ->and([$completedEvents(), $deliveries()])->toBe($before)
+        ->and(DB::table('documents')->where('envelope_id', $envelope->getKey())->count())->toBe(1);
+});
+
 it('completes the required PDF corpus with strict page geometry and idempotent delivery', function (string $fixture): void {
     [$envelope, , $rendered] = completeFixtureEnvelope($fixture);
     $document = $envelope->document;
