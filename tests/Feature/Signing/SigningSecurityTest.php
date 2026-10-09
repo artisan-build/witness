@@ -345,3 +345,30 @@ it('throttles public signer routes by IP without resolving a human user', functi
 
     $this->get(route('sign.open', 'bad31'))->assertTooManyRequests();
 });
+
+it('deletes the stored png when a sibling field fails validation in the same save', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature, FieldType::Text]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+    $fields = $signer->fields()->orderBy('id')->get();
+    $validPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[0]->getKey() => ['kind' => 'drawn', 'drawn' => 'data:image/png;base64,'.base64_encode($validPng)],
+        $fields[1]->getKey() => ['kind' => 'text', 'text' => '<svg onload=alert(1)>'],
+    ]])->assertSessionHasErrors('fields');
+
+    expect($fields[0]->fresh()->value)->toBeNull()
+        ->and(Storage::allFiles('signatures'))->toBeEmpty();
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[0]->getKey() => ['kind' => 'drawn', 'drawn' => 'data:image/png;base64,'.base64_encode($validPng)],
+    ]])->assertRedirect();
+    expect($filesAfterFirstSave = Storage::allFiles('signatures'))->toHaveCount(1);
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[0]->getKey() => ['kind' => 'drawn', 'drawn' => 'data:image/png;base64,'.base64_encode($validPng)],
+    ]])->assertRedirect();
+    expect(Storage::allFiles('signatures'))->toHaveCount(1)
+        ->and(Storage::allFiles('signatures'))->not->toBe($filesAfterFirstSave);
+});
