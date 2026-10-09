@@ -34,7 +34,7 @@ function startSenderOperation(string $operation, int $teamId, int $userId, int $
     ], base_path(), [
         'APP_ENV' => 'testing',
         'DB_CONNECTION' => 'pgsql',
-        'DB_DATABASE' => 'witness_app_test',
+        'DB_DATABASE' => config('database.connections.pgsql.database'),
         'DB_URL' => '',
     ]);
     $process->setTimeout(10);
