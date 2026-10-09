@@ -676,3 +676,23 @@ it('bounds total code issues per ip across signers', function (): void {
     expect(fn () => resolve(OpenSigningLink::class)->handle($eleventhToken, '127.0.0.1', 'Ip throttle probe'))
         ->toThrow(ValidationException::class);
 });
+
+it('refuses to sign while a required checkbox is unchecked', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature, FieldType::Checkbox]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+    $fields = $signer->fields()->orderBy('id')->get();
+    $validPng = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $fields[0]->getKey() => ['kind' => 'drawn', 'drawn' => 'data:image/png;base64,'.base64_encode($validPng)],
+        $fields[1]->getKey() => ['kind' => 'checkbox', 'checked' => false],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+    expect($fields[1]->fresh()->value['checked'])->toBeFalse()
+        ->and($fields[1]->fresh()->completed_at)->not->toBeNull();
+
+    $this->post(route('sign.complete'), ['intent' => '1'])->assertSessionHasErrors('intent');
+
+    expect($signer->fresh()->status)->not->toBe(SignerStatus::Signed)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Signed)->count())->toBe(0);
+});
