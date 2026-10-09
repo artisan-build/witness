@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\CreateDraftEnvelope;
 use App\Actions\DeclineEnvelope;
 use App\Actions\RecordSigningConsent;
+use App\Actions\OpenSigningLink;
 use App\Actions\SaveSignerFields;
 use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
@@ -35,6 +36,25 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\HostileAuthUser;
+
+it('makes double submission idempotent with exactly one signed audit event', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+    $signature = $signer->fields()->where('type', FieldType::Signature)->firstOrFail();
+    $this->post(route('sign.fields'), ['fields' => [
+        $signature->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer'],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+    Event::fake([EnvelopeReadyForCompletion::class]);
+
+    $first = resolve(SignEnvelope::class)->handle($signer->fresh(), '192.0.2.21', 'Idempotence probe');
+    $second = resolve(SignEnvelope::class)->handle($signer->fresh(), '192.0.2.21', 'Idempotence probe');
+
+    expect($first->is($second))->toBeTrue()
+        ->and($signer->fresh()->status)->toBe(SignerStatus::Signed)
+        ->and($signer->fresh()->signed_at)->not->toBeNull()
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Signed)->count())->toBe(1);
+});
 
 it('keeps invalid, cross-envelope, sender-session, and terminal access neutral', function (): void {
     [$envelopeA, $signerA, $tokenA] = createSigningEnvelope([FieldType::Signature]);
@@ -598,4 +618,61 @@ it('refuses consent before the OTP is verified and records one consent event wit
     $again = resolve(RecordSigningConsent::class)->handle($signer->fresh(), '192.0.2.6', 'Consent probe');
     expect($again->consented_at)->not->toBeNull()
         ->and($again->envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(1);
+});
+
+it('does not resend or rotate a live code and bounds reissues per signer', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+
+    Mail::assertSent(SigningCode::class, 1);
+    $firstHash = $signer->fresh()->otp_hash;
+    expect($signer->fresh()->status)->toBe(SignerStatus::Viewed)
+        ->and($signer->fresh()->viewed_at)->not->toBeNull()
+        ->and($signer->fresh()->envelope->auditEvents()->where('type', AuditEventType::Opened)->count())->toBe(1);
+
+    $this->get(route('sign.open', $token))->assertRedirect();
+    Mail::assertSent(SigningCode::class, 1);
+    expect($signer->fresh()->otp_hash)->toBe($firstHash)
+        ->and($signer->fresh()->otp_expires_at->isFuture())->toBeTrue();
+
+    foreach ([1, 2] as $round) {
+        DB::transaction(function () use ($signer): void {
+            DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+            Signer::query()->whereKey($signer)->update(['otp_expires_at' => now()->subSecond()]);
+        });
+        $this->get(route('sign.open', $token))->assertRedirect();
+    }
+    Mail::assertSent(SigningCode::class, 3);
+
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update(['otp_expires_at' => now()->subSecond()]);
+    });
+    expect(fn () => resolve(OpenSigningLink::class)->handle($token, '192.0.2.30', 'Reissue throttle probe'))
+        ->toThrow(ValidationException::class);
+    Mail::assertSent(SigningCode::class, 3);
+
+    [$secondEnvelope, $secondSigner, $secondToken] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $secondToken))->assertRedirect();
+    Mail::assertSent(SigningCode::class, fn (SigningCode $mail): bool => $mail->signer->is($secondSigner));
+    expect($secondSigner->fresh()->otp_hash)->not->toBeNull();
+});
+
+it('bounds total code issues per ip across signers', function (): void {
+    $codes = 0;
+
+    foreach (range(1, 10) as $index) {
+        [, $signer, $token] = createSigningEnvelope([FieldType::Signature], signerName: "Ip pool signer {$index}");
+        $this->get(route('sign.open', $token))->assertRedirect();
+        $signer->refresh();
+        if ($signer->otp_hash !== null) {
+            $codes++;
+        }
+    }
+
+    expect($codes)->toBe(10);
+
+    [, $eleventhSigner, $eleventhToken] = createSigningEnvelope([FieldType::Signature], signerName: 'Ip pool signer 11');
+    expect(fn () => resolve(OpenSigningLink::class)->handle($eleventhToken, '127.0.0.1', 'Ip throttle probe'))
+        ->toThrow(ValidationException::class);
 });
