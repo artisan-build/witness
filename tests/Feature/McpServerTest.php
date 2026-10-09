@@ -617,7 +617,7 @@ it('previews and confirms template sending exactly once through the destructive 
         ->and($executed->json('result.structuredContent.envelope_id'))->toBe($envelope->getKey())
         ->and($envelope->status)->toBe(EnvelopeStatusEnum::Sent)
         ->and($envelope->document->storage_path)->not->toBe($template->storage_path)
-        ->and($envelope->signers->pluck('role_label')->all())->toBe(['Client', 'Company'])
+        ->and($envelope->signers()->orderBy('position')->pluck('role_label')->all())->toBe(['Client', 'Company'])
         ->and($envelope->fields()->count())->toBe(2);
 
     callWitnessMcpTool('/mcp/destructive', $credential['plaintext'], 'send_from_template', [
