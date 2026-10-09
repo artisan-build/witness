@@ -753,3 +753,26 @@ it('rotates only an unknown delivery for a viewed signer under the issue throttl
 
     Mail::assertSent(SigningCode::class, 3);
 });
+
+it('refuses code rotation while the latest delivery is a fresh sending handoff', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+    $hashBefore = $signer->fresh()->otp_hash;
+    $latest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    DB::table('mail_deliveries')->where('id', $latest->getKey())->update(['status' => MailDeliveryStatus::Sending->value, 'attempted_at' => now()]);
+
+    try {
+        resolve(RotateSigningCode::class)->handle($signer->fresh(), '192.0.2.41', 'Rotation probe');
+        test()->fail('A fresh in-flight code delivery was rotated anyway.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['code'][0])->toContain('still in progress');
+    }
+
+    expect($signer->fresh()->otp_hash)->toBe($hashBefore)
+        ->and($latest->fresh()->status)->toBe(MailDeliveryStatus::Sending)
+        ->and($signer->fresh()->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode)->count())->toBe(1);
+    Mail::assertSent(SigningCode::class, 1);
+});
