@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Actions\DeclineEnvelope;
+use App\Actions\RotateSigningCode;
 use App\Actions\RotateSigningInvitation;
 use App\Actions\SendEnvelope;
 use App\Enums\AuditActorType;
@@ -12,6 +13,7 @@ use App\Enums\FieldType;
 use App\Enums\MailDeliveryPurpose;
 use App\Enums\MailDeliveryStatus;
 use App\Enums\SignerStatus;
+use App\Exceptions\SigningAccessDenied;
 use App\Mail\SigningCode;
 use App\Mail\SigningDeclined;
 use App\Mail\SigningInvitation;
@@ -181,6 +183,22 @@ it('refuses code rotation for a signer that is no longer viewable', function ():
     $this->post(route('sign.code.rotate'))->assertOk()->assertSee('data-testid="signer-neutral"', false);
     expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1)
         ->and($signer->fresh()->otp_hash)->toBe($firstHash);
+});
+
+it('refuses rotation at the action level for a signer that is no longer viewable', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect(route('sign.show'));
+    $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode->value)
+        ->firstOrFail()->update(['status' => MailDeliveryStatus::Unknown]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update(['status' => SignerStatus::Signed, 'signed_at' => now()]);
+    });
+
+    expect(fn () => resolve(RotateSigningCode::class)->handle($signer->refresh(), '192.0.2.30', 'Rotation admission test'))
+        ->toThrow(SigningAccessDenied::class)
+        ->and($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1);
 });
 
 it('keeps a failed decline notification unknown without a retry seam and renders truthful status', function (): void {
