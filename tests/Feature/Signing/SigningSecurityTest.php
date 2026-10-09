@@ -227,6 +227,15 @@ it('rejects executable typed content and malformed drawn signatures without pers
     ]])->assertSessionHasErrors('fields');
     expect($field->fresh()->value)->toBeNull()
         ->and(Storage::allFiles('signatures'))->toBeEmpty();
+
+    $this->post(route('sign.fields'), ['fields' => [
+        $field->getKey() => [
+            'kind' => 'drawn',
+            'drawn' => 'data:image/PNG;base64,'.base64_encode($validPng),
+        ],
+    ]])->assertSessionHasErrors('fields');
+    expect($field->fresh()->value)->toBeNull()
+        ->and(Storage::allFiles('signatures'))->toBeEmpty();
 });
 
 it('sets anti-framing policy on every signer HTML and redirect surface while sandboxing PDFs', function (): void {
