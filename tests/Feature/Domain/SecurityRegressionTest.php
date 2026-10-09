@@ -11,7 +11,10 @@ use App\Domain\Audit\LifecyclePolicy;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
+use App\Enums\FieldType;
+use App\Enums\SignerStatus;
 use App\Events\EnvelopeLifecycleRecorded;
+use App\Events\EnvelopeReadyForCompletion;
 use App\Models\AuditEvent;
 use App\Models\Envelope;
 use App\Models\Field;
@@ -21,9 +24,11 @@ use App\Models\Template;
 use App\Models\TemplateField;
 use App\Models\TemplateRole;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Thunk\Verbs\Models\VerbEvent;
 
@@ -92,11 +97,18 @@ it('allows only locked domain actions to write signer results and refuses premat
         ['text' => 'Approved'],
         now(),
     );
+    $field = resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $field,
+        ['text' => 'Revised'],
+        null,
+    );
     Storage::fake('local');
     Storage::put('documents/final.pdf', 'final document');
 
-    expect($field->value)->toBe(['text' => 'Approved'])
-        ->and($field->completed_at)->not->toBeNull()
+    expect($field->value)->toBe(['text' => 'Revised'])
+        ->and($field->completed_at)->toBeNull()
         ->and(fn () => resolve(StoreFinalDocument::class)->handle(
             $envelope,
             'documents/final.pdf',
@@ -116,6 +128,126 @@ it('rejects direct result and final artifact writes', function (): void {
         ->and(fn () => DB::transaction(
             fn () => $envelope->document()->update(['final_storage_path' => 'documents/forged.pdf']),
         ))->toThrow(QueryException::class, 'locked domain action');
+});
+
+it('refuses field responses on a draft envelope', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+
+    expect(fn () => resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $field,
+        ['text' => 'too early'],
+        now(),
+    ))->toThrow(DomainException::class, 'A field response must target its signer on a sent envelope.');
+});
+
+it('refuses field responses from a signer of another envelope', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $otherEnvelope = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Foreign signer envelope']);
+    $foreignSigner = Signer::factory()->for($otherEnvelope)->create();
+
+    expect(fn () => resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $foreignSigner,
+        $field,
+        ['text' => 'forged by foreign signer'],
+        now(),
+    ))->toThrow(ModelNotFoundException::class);
+});
+
+it('refuses field responses for a field of another envelope', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $otherEnvelope = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Foreign field envelope']);
+    $foreignSigner = Signer::factory()->for($otherEnvelope)->create();
+    $foreignField = Field::factory()->forSigner($foreignSigner)->create();
+
+    expect(fn () => resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $foreignField,
+        ['text' => 'forged into foreign field'],
+        now(),
+    ))->toThrow(ModelNotFoundException::class);
+});
+
+it('refuses field responses after the signer signs', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+    $signature = $signer->fields()->where('type', FieldType::Signature)->firstOrFail();
+    $this->post(route('sign.fields'), ['fields' => [
+        $signature->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer'],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+    Event::fake([EnvelopeReadyForCompletion::class]);
+    $this->post(route('sign.complete'), ['intent' => '1'])->assertOk();
+
+    $signer->refresh();
+    $field = $signer->fields()->firstOrFail();
+    expect($signer->status)->toBe(SignerStatus::Signed)
+        ->and(fn () => resolve(UpdateFieldResponse::class)->handle(
+            $envelope,
+            $signer,
+            $field,
+            ['text' => 'after signing'],
+            now(),
+        ))->toThrow(DomainException::class, 'A field response must target its signer on a sent envelope.');
+});
+
+it('refuses field responses after the signer declines', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.decline'), ['reason' => 'Terms do not match.'])->assertOk();
+    $signer->refresh();
+    $field = $signer->fields()->firstOrFail();
+
+    expect($signer->status)->toBe(SignerStatus::Declined)
+        ->and(fn () => resolve(UpdateFieldResponse::class)->handle(
+            $envelope,
+            $signer,
+            $field,
+            ['text' => 'after decline'],
+            now(),
+        ))->toThrow(DomainException::class, 'A field response must target its signer on a sent envelope.');
+});
+
+it('refuses field responses on an expired envelope', function (): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+    $envelope = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $sender,
+        title: 'Expired response envelope',
+        originalName: 'expired.pdf',
+        storagePath: 'documents/expired.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'expired response document'),
+        expiresAt: now()->subDay(),
+    );
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect($envelope->fresh()->expires_at->isPast())->toBeTrue()
+        ->and(fn () => resolve(UpdateFieldResponse::class)->handle(
+            $envelope,
+            $signer,
+            $field,
+            ['text' => 'too late'],
+            now(),
+        ))->toThrow(DomainException::class, 'A field response must target its signer on a sent envelope.');
 });
 
 it('rejects builder relation and parent cascade changes to a frozen envelope', function (): void {
