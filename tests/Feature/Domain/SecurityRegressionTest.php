@@ -97,23 +97,42 @@ it('allows only locked domain actions to write signer results and refuses premat
         ['text' => 'Approved'],
         now(),
     );
-    $field = resolve(UpdateFieldResponse::class)->handle(
-        $envelope,
-        $signer,
-        $field,
-        ['text' => 'Revised'],
-        null,
-    );
     Storage::fake('local');
     Storage::put('documents/final.pdf', 'final document');
 
-    expect($field->value)->toBe(['text' => 'Revised'])
-        ->and($field->completed_at)->toBeNull()
+    expect($field->value)->toBe(['text' => 'Approved'])
+        ->and($field->completed_at)->not->toBeNull()
         ->and(fn () => resolve(StoreFinalDocument::class)->handle(
             $envelope,
             'documents/final.pdf',
             hash('sha256', 'final document'),
         ))->toThrow(DomainException::class, 'fully signed');
+});
+
+it('clears a field response timestamp when none is supplied', function (): void {
+    [$team, $sender, $envelope] = createSecurityEnvelope();
+    $signer = Signer::factory()->for($envelope)->create();
+    $field = Field::factory()->forSigner($signer)->create();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $stamped = resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $field,
+        ['text' => 'First'],
+        now(),
+    );
+    $cleared = resolve(UpdateFieldResponse::class)->handle(
+        $envelope,
+        $signer,
+        $stamped,
+        ['text' => 'Second'],
+        null,
+    );
+
+    expect($stamped->completed_at)->not->toBeNull()
+        ->and($cleared->value)->toBe(['text' => 'Second'])
+        ->and($cleared->completed_at)->toBeNull();
 });
 
 it('rejects direct result and final artifact writes', function (): void {
