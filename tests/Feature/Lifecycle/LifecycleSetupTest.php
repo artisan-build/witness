@@ -424,14 +424,6 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
 
     resolve(PurgeEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey());
 
-    file_put_contents(getenv('HOME').'/b7-disk.txt', print_r([
-        'default_disk' => config('filesystems.default'),
-        'original' => Storage::exists($originalPath),
-        'drawn' => Storage::exists($drawnPath),
-        'final' => Storage::exists($finalPath),
-        'local_all' => Storage::disk('local')->allFiles(),
-    ], true));
-
     expect($deletes)->toBe([$originalPath, $finalPath, $drawnPath])
         ->and(Envelope::query()->find($envelope->getKey()))->toBeNull()
         ->and(AuditEvent::query()->where('envelope_id', $envelope->getKey())->count())->toBe(0)
