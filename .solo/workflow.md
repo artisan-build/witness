@@ -10,7 +10,8 @@ single Built for Cloud Laravel application; it is not a monorepo.
 
 - phase: `pre-launch`
 - default mode: `A-autonomous`
-- merge policy: `night shift 2026-10-05: merge on green LOCAL gate (Actions down); extra review + real CI before catalog (Ed)`
+- merge policy: real GitHub Actions CI is live; merge with `gh pr merge --squash` only on green CI;
+  required checks on `main` are `tests` and `lint` (brain sets the protection).
 - security review: PR1, PR3, PR4, and PR6 require the full independent quality reviewer + acceptance
   judge pair before merge.
 - merge method: `gh pr merge --squash`
@@ -34,12 +35,11 @@ handoff. The coordinator alone runs the full gate.
 
 ## CI
 
-- status: workflow committed, but GitHub Actions is unavailable during this build.
+- status: real GitHub Actions CI is live.
 - `.github/workflows/tests.yml` must run Pest against a PostgreSQL 16 service, Larastan/PHPStan, Pint,
   Composer audit, and the `composer ready` gate.
-- do not add required-check branch protection during the night shift.
-- before catalog admission: run real CI, add required-check branch protection, and perform the extra
-  review required by the night-shift policy.
+- required checks on `main` are `tests` and `lint`; brain sets the branch protection.
+- before catalog admission: perform the extra review required by the pre-catalog policy.
 
 ## Dependency Install
 
@@ -54,10 +54,8 @@ handoff. The coordinator alone runs the full gate.
 - branch naming: `feat/<slug>`
 - PR target: `artisan-build/witness`, branch `main`
 - PR-S exception: the scaffold's first commit lands directly on the empty repository's `main`.
-- merge method after PR-S: `gh pr merge --squash` as soon as the coordinator's local gate is green;
-  do not wait for Actions during the declared outage.
-- forbidden: tags, public visibility changes, Cloud deploys, Scalpels catalog changes, required-check
-  branch protection during the night shift, and real email.
+- merge method after PR-S: `gh pr merge --squash` only after real GitHub Actions CI is green.
+- forbidden: tags, public visibility changes, Cloud deploys, Scalpels catalog changes, and real email.
 
 ## Plan And Coordination
 
