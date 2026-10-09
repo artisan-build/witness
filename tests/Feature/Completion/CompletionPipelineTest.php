@@ -33,6 +33,7 @@ use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
 use Com\Tecnick\Pdf\Tcpdf;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
@@ -605,6 +606,61 @@ it('lays out long certificate evidence without overlapping emitted text lines', 
     expect($pdf->getSourcePageCount($source))->toBe(
         $completed->sourcePageCount + $completed->certificatePageCount,
     );
+});
+
+it('removes the stored candidate when completion fails after storing it', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update([
+            'status' => SignerStatus::Viewed,
+            'otp_verified_at' => now()->subMinutes(2),
+            'consented_at' => now()->subMinute(),
+            'updated_at' => now(),
+        ]);
+    });
+    foreach ([AuditEventType::CodeVerified, AuditEventType::Consented] as $type) {
+        EnvelopeLifecycleRecorded::record(
+            $envelope,
+            $type,
+            AuditActorType::Signer,
+            $signer->getKey(),
+            '192.0.2.13',
+            'Candidate test',
+        );
+    }
+    $field = $signer->fields()->firstOrFail();
+    resolve(SaveSignerFields::class)->handle($signer->refresh(), [
+        $field->getKey() => ['kind' => 'typed', 'typed' => 'Candidate Signer'],
+    ], '192.0.2.13', 'Candidate test');
+    Event::fake([EnvelopeReadyForCompletion::class]);
+    resolve(SignEnvelope::class)->handle($signer->refresh(), '192.0.2.13', 'Candidate test');
+
+    DB::unprepared(<<<'SQL'
+        CREATE OR REPLACE FUNCTION witness_test_reject_completion_audit() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'Forced completion audit failure'; END;
+        $$ LANGUAGE plpgsql;
+
+        CREATE TRIGGER witness_test_reject_completion_audit
+        BEFORE INSERT ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION witness_test_reject_completion_audit();
+        SQL);
+
+    try {
+        expect(fn () => resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))
+            ->toThrow(QueryException::class, 'Forced completion audit failure')
+            ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent);
+    } finally {
+        DB::unprepared(<<<'SQL'
+            DROP TRIGGER IF EXISTS witness_test_reject_completion_audit ON audit_events;
+            DROP FUNCTION IF EXISTS witness_test_reject_completion_audit();
+            SQL);
+    }
+
+    expect(collect(Storage::disk('local')->allFiles())
+        ->filter(fn (string $path): bool => str_contains($path, '/completed/'))->values()->all())
+        ->toBe([])
+        ->and(resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))->toBeNull();
 });
 
 it('leaves no completion state or delivery after failure and retries safely', function (): void {
