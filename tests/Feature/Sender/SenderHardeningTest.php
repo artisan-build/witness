@@ -108,6 +108,22 @@ it('freezes envelope definitions and reserves signer progress for domain actions
         ->and($envelope->fresh()->title)->toBe('Locked agreement');
 });
 
+it('freezes every signer definition column and refuses model-level removal after send', function (): void {
+    [$team, $sender, $envelope, $signer] = createHardenedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    expect(fn () => $signer->fresh()->update(['email' => 'moved@example.test']))
+        ->toThrow(DomainException::class, 'Signer definitions cannot be changed after send.')
+        ->and(fn () => $signer->fresh()->update(['role_label' => 'Moved role']))
+        ->toThrow(DomainException::class, 'Signer definitions cannot be changed after send.')
+        ->and(fn () => $signer->fresh()->update(['position' => 3]))
+        ->toThrow(DomainException::class, 'Signer definitions cannot be changed after send.')
+        ->and(fn () => $signer->fresh()->delete())
+        ->toThrow(DomainException::class, 'Signers cannot be removed after send.')
+        ->and(fn () => $envelope->fresh()->update(['expires_at' => now()->addDays(31)]))
+        ->toThrow(DomainException::class, 'cannot be changed after send');
+});
+
 it('returns a controlled conflict before storing for a document-less draft', function (): void {
     Storage::fake('local');
     $user = UserFactory::new()->create();
