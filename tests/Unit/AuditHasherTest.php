@@ -20,3 +20,14 @@ it('compares through the constant-time hash_equals primitive rather than a short
 
     expect($body)->toContain('hash_equals(');
 });
+
+it('hashes each event over its predecessor hash concatenated with the canonical bytes', function (): void {
+    $hasher = resolve(AuditHasher::class);
+    $previous = str_repeat('ab', 32);
+    $canonical = '{"type":"sent","sequence":2}';
+
+    expect($hasher->eventHash($previous, $canonical))
+        ->toBe(hash('sha256', $previous.$canonical))
+        ->and($hasher->eventHash('one', $canonical))
+        ->not->toBe($hasher->eventHash('two', $canonical));
+});
