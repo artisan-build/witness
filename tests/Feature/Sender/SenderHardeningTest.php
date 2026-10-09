@@ -145,6 +145,29 @@ it('returns a controlled conflict before storing for a document-less draft', fun
         ->and($envelope->document()->exists())->toBeFalse();
 });
 
+it('deletes the just-stored pdf when the replacement transaction fails', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Failed replacement',
+        'document' => UploadedFile::fake()->createWithContent('base.pdf', PdfFixture::make()),
+    ]);
+    $envelope = Envelope::query()->firstOrFail();
+    $before = count(Storage::disk('local')->allFiles());
+
+    DB::listen(function (QueryExecuted $query): void {
+        if (str_starts_with($query->sql, 'update "documents"')) {
+            throw new RuntimeException('Forced replacement failure.');
+        }
+    });
+
+    $this->put(route('sender.envelopes.document', $envelope), [
+        'document' => UploadedFile::fake()->createWithContent('replacement.pdf', PdfFixture::make()),
+    ]);
+
+    expect(count(Storage::disk('local')->allFiles()))->toBe($before);
+});
+
 it('durably records failed deletion and retries on the recorded disk', function (): void {
     Storage::fake('local');
     Storage::disk('local')->put('documents/stale.pdf', 'stale');
