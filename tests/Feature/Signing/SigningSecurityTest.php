@@ -2,21 +2,30 @@
 
 declare(strict_types=1);
 
+use App\Actions\CreateDraftEnvelope;
 use App\Actions\DeclineEnvelope;
+use App\Actions\RecordSigningConsent;
 use App\Actions\SaveSignerFields;
+use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
 use App\Actions\VerifySigningCode;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Enums\SignerStatus;
+use App\Events\EnvelopeReadyForCompletion;
 use App\Exceptions\SigningAccessDenied;
 use App\Mail\SigningCode;
 use App\Mail\SigningDeclined;
 use App\Mail\SigningInvitation;
+use App\Models\Envelope;
 use App\Models\Signer;
+use App\Models\Team;
+use App\Services\SigningSession;
 use ArtisanBuild\BuiltForCloud\Mail\ScalpelsTransport;
+use Database\Factories\UserFactory;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\Request;
 use Illuminate\Mail\MailManager;
 use Illuminate\Mail\Transport\ArrayTransport;
 use Illuminate\Support\Facades\Auth;
@@ -395,4 +404,198 @@ it('skips untouched blank signature controls without aborting sibling saves', fu
 
     expect($fields[1]->fresh()->value['value'])->toBe('Typed value')
         ->and($fields[0]->fresh()->value)->toBeNull();
+});
+
+it('locks a signer after five failed codes and refuses further verification', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+    $signer = $signer->fresh();
+
+    for ($attempt = 1; $attempt <= 4; $attempt++) {
+        try {
+            resolve(VerifySigningCode::class)->handle($signer->fresh(), 'wrong-code', '192.0.2.7', 'Lock probe');
+            test()->fail('An invalid code unexpectedly verified.');
+        } catch (ValidationException $exception) {
+            expect($signer->fresh()->otp_locked_at)->toBeNull()
+                ->and($exception->errors()['code'][0])->not->toContain('locked');
+        }
+    }
+
+    try {
+        resolve(VerifySigningCode::class)->handle($signer->fresh(), 'wrong-code', '192.0.2.7', 'Lock probe');
+        test()->fail('The fifth invalid code did not lock the signer.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['code'][0])->toContain('locked');
+    }
+
+    expect($signer->fresh()->otp_locked_at)->not->toBeNull()
+        ->and($signer->fresh()->otp_attempts)->toBe(5);
+
+    expect(fn () => resolve(VerifySigningCode::class)->handle($signer->fresh(), 'wrong-code', '192.0.2.7', 'Lock probe'))
+        ->toThrow(SigningAccessDenied::class);
+});
+
+it('cannot replay a code after it has been verified and resets attempts', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+    $code = null;
+    Mail::assertSent(SigningCode::class, function (SigningCode $mail) use (&$code): bool {
+        $code ??= $mail->code;
+
+        return true;
+    });
+
+    try {
+        resolve(VerifySigningCode::class)->handle($signer->fresh(), 'wrong-code', '192.0.2.8', 'Replay probe');
+        test()->fail('An invalid code unexpectedly verified.');
+    } catch (ValidationException) {
+    }
+
+    try {
+        resolve(VerifySigningCode::class)->handle($signer->fresh(), 'wrong-code', '192.0.2.8', 'Replay probe');
+        test()->fail('An invalid code unexpectedly verified.');
+    } catch (ValidationException) {
+    }
+
+    $verified = resolve(VerifySigningCode::class)->handle($signer->fresh(), $code, '192.0.2.8', 'Replay probe');
+    expect($verified->otp_verified_at)->not->toBeNull()
+        ->and($verified->otp_hash)->toBeNull()
+        ->and($verified->otp_attempts)->toBe(0);
+
+    expect(fn () => resolve(VerifySigningCode::class)->handle($signer->fresh(), $code, '192.0.2.8', 'Replay probe'))
+        ->toThrow(SigningAccessDenied::class);
+
+    $failedAttempts = $verified->envelope->auditEvents()
+        ->where('type', AuditEventType::CodeFailed)
+        ->orderBy('sequence')
+        ->get()
+        ->map(fn ($event) => $event->payload['attempt']);
+
+    expect($failedAttempts->all())->toBe([1, 2]);
+});
+
+function boundTokenSession(Signer $signer, string $tokenHash): Request
+{
+    $request = Request::create('/sign');
+    $request->setLaravelSession(resolve('session.store'));
+    resolve(SigningSession::class)->bind($request, $signer, $tokenHash);
+
+    return $request;
+}
+
+it('binds and regenerates token-bound sessions and forgets tampered or invalid bindings', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $session = resolve(SigningSession::class);
+    $tokenHash = hash('sha256', $token);
+
+    $request = Request::create('/sign');
+    $request->setLaravelSession(resolve('session.store'));
+    $idBeforeBind = $request->session()->getId();
+    $session->bind($request, $signer, $tokenHash);
+
+    expect($request->session()->getId())->not->toBe($idBeforeBind)
+        ->and($session->signer($request)->is($signer))->toBeTrue();
+
+    $request->session()->put('witness.signer', ['signer_id' => $signer->getKey(), 'token_hash' => 'forged-token-hash']);
+    expect(fn () => $session->signer($request))->toThrow(SigningAccessDenied::class)
+        ->and($request->session()->has('witness.signer'))->toBeFalse();
+
+    $request->session()->put('witness.signer', ['signer_id' => 999999999, 'token_hash' => $tokenHash]);
+    expect(fn () => $session->signer($request))->toThrow(SigningAccessDenied::class);
+});
+
+it('denies sessions on draft and expired envelopes', function (): void {
+    $team = Team::factory()->create();
+    $sender = UserFactory::new()->create();
+    $team->users()->attach($sender);
+
+    $draft = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Draft session']);
+    $draftSigner = Signer::factory()->for($draft)->create(['link_token_hash' => hash('sha256', 'draft-token')]);
+    $session = resolve(SigningSession::class);
+    $draftRequest = boundTokenSession($draftSigner, hash('sha256', 'draft-token'));
+    expect(fn () => $session->signer($draftRequest))->toThrow(SigningAccessDenied::class);
+
+    $expired = resolve(CreateDraftEnvelope::class)->handle(
+        team: $team,
+        sender: $sender,
+        title: 'Expired session',
+        originalName: 'expired-session.pdf',
+        storagePath: 'documents/expired-session.pdf',
+        sizeBytes: 128,
+        pageCount: 1,
+        originalSha256: hash('sha256', 'expired session document'),
+        expiresAt: now()->subDay(),
+    );
+    $expiredSigner = Signer::factory()->for($expired)->create(['link_token_hash' => hash('sha256', 'expired-token')]);
+    $expiredSigner->fields()->create([
+        'page' => 1,
+        'type' => 'signature',
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .1,
+        'width' => .2,
+        'height' => .1,
+    ]);
+    resolve(SendEnvelope::class)->handle($team, $sender, $expired->getKey());
+    $expiredRequest = boundTokenSession($expiredSigner, hash('sha256', 'expired-token'));
+    expect(fn () => $session->signer($expiredRequest))->toThrow(SigningAccessDenied::class);
+});
+
+it('returns the neutral surface once the signer has declined', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.decline'), ['reason' => 'No.'])->assertOk();
+    expect($signer->fresh()->status)->toBe(SignerStatus::Declined);
+
+    $terminalRequest = boundTokenSession($signer->fresh(), hash('sha256', $token));
+    expect(fn () => resolve(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
+
+    $this->get(route('sign.show'))
+        ->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertDontSee($envelope->title);
+});
+
+it('returns the neutral surface once the signer has signed', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+    $signature = $signer->fields()->where('type', FieldType::Signature)->firstOrFail();
+    $this->post(route('sign.fields'), ['fields' => [
+        $signature->getKey() => ['kind' => 'typed', 'typed' => 'Alex Signer'],
+    ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+    Event::fake([EnvelopeReadyForCompletion::class]);
+    $this->post(route('sign.complete'), ['intent' => '1'])->assertOk();
+    expect($signer->fresh()->status)->toBe(SignerStatus::Signed);
+
+    $terminalRequest = boundTokenSession($signer->fresh(), hash('sha256', $token));
+    expect(fn () => resolve(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
+
+    $this->get(route('sign.show'))
+        ->assertOk()
+        ->assertSee('data-testid="signer-neutral"', false)
+        ->assertDontSee($envelope->title);
+});
+
+it('refuses consent before the OTP is verified and records one consent event with metadata', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+
+    expect(fn () => resolve(RecordSigningConsent::class)->handle($signer->fresh(), '192.0.2.6', 'Consent probe'))
+        ->toThrow(SigningAccessDenied::class);
+
+    openAndVerifySigner($this, $token);
+    $consented = resolve(RecordSigningConsent::class)->handle($signer->fresh(), '192.0.2.6', 'Consent probe');
+
+    expect($consented->consented_at)->not->toBeNull()
+        ->and($consented->envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(1);
+
+    $event = $consented->envelope->auditEvents()->where('type', AuditEventType::Consented)->firstOrFail();
+    expect($event->payload['disclosure_version'])->toBe('esign-v1')
+        ->and($event->ip_address)->toBe('192.0.2.6')
+        ->and($event->user_agent)->toBe('Consent probe');
+
+    $again = resolve(RecordSigningConsent::class)->handle($signer->fresh(), '192.0.2.6', 'Consent probe');
+    expect($again->consented_at)->not->toBeNull()
+        ->and($again->envelope->auditEvents()->where('type', AuditEventType::Consented)->count())->toBe(1);
 });
