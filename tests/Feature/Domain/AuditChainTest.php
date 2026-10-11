@@ -358,6 +358,50 @@ it('rebuilds a deleted audit projection in order during replay', function (): vo
         ->and($result->valid)->toBeTrue();
 });
 
+it('refuses a lifecycle event whose team does not match its envelope', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $sent = VerbEvent::query()->orderBy('id')->get()->values()->get(1);
+    $data = $sent->data;
+    $data['team_id'] = Team::factory()->create()->getKey();
+    DB::table('verb_events')->where('id', $sent->id)->update(['data' => json_encode($data)]);
+
+    tamperWithAuditEvents(fn () => DB::table('audit_events')->where('envelope_id', $envelope->getKey())->delete());
+    DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['audit_event_count' => 0, 'audit_chain_head' => null]);
+    DB::statement("SELECT set_config('witness.audit_append', 'off', true)");
+
+    $event = VerbEvent::query()->findOrFail($sent->id)->event();
+    expect($event)->toBeInstanceOf(EnvelopeLifecycleRecorded::class);
+
+    expect(fn () => $event->handle(resolve(AuditCanonicalizer::class), resolve(AuditHasher::class), resolve(LifecyclePolicy::class)))
+        ->toThrow(DomainException::class, 'does not match its envelope')
+        ->and(AuditEvent::query()->count())->toBe(0);
+});
+
+it('refuses a lifecycle event whose original document hash does not match its envelope', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $sent = VerbEvent::query()->orderBy('id')->get()->values()->get(1);
+    $data = $sent->data;
+    $data['original_document_sha256'] = str_repeat('ab', 32);
+    DB::table('verb_events')->where('id', $sent->id)->update(['data' => json_encode($data)]);
+
+    tamperWithAuditEvents(fn () => DB::table('audit_events')->where('envelope_id', $envelope->getKey())->delete());
+    DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+    DB::table('envelopes')->where('id', $envelope->getKey())->update(['audit_event_count' => 0, 'audit_chain_head' => null]);
+    DB::statement("SELECT set_config('witness.audit_append', 'off', true)");
+
+    $event = VerbEvent::query()->findOrFail($sent->id)->event();
+    expect($event)->toBeInstanceOf(EnvelopeLifecycleRecorded::class);
+
+    expect(fn () => $event->handle(resolve(AuditCanonicalizer::class), resolve(AuditHasher::class), resolve(LifecyclePolicy::class)))
+        ->toThrow(DomainException::class, 'document hash does not match')
+        ->and(AuditEvent::query()->count())->toBe(0);
+});
+
 it('derives genesis from both envelope identity and original document hash', function (): void {
     $hasher = resolve(AuditHasher::class);
     $hashA = hash('sha256', 'document A');
