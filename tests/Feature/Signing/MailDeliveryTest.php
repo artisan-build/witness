@@ -773,4 +773,14 @@ it('routes invitation code and decline mail through the default mailer with the 
                 && $metadata->replyTo[0]->name === $senderName;
         });
     }
+
+    foreach ([
+        new SigningInvitation($envelope, $signer, 'probe-token'),
+        new SigningCode($envelope, $signer, 'probe-code'),
+        new SigningDeclined($envelope, $signer, 'probe-reason'),
+    ] as $mailable) {
+        expect($mailable->mailer)->toBeNull()
+            ->and($mailable->usesMailer('log'))->toBeFalse()
+            ->and($mailable->usesMailer('smtp'))->toBeFalse();
+    }
 });
