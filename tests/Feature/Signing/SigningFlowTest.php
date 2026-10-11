@@ -175,6 +175,7 @@ it('dispatches the completion event exactly once and only when the final signer 
     Event::assertNotDispatched(EnvelopeReadyForCompletion::class);
 
     $sign($secondSigner, $tokens[$secondSigner->email]);
+    resolve(SignEnvelope::class)->handle($firstSigner->refresh(), '192.0.2.20', 'Duplicate final sign');
     Event::assertDispatchedTimes(EnvelopeReadyForCompletion::class, 1);
     Event::assertDispatched(EnvelopeReadyForCompletion::class, fn ($event) => $event->envelopeId === $envelope->getKey());
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
