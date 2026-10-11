@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Actions\CreateDraftEnvelope;
 use App\Actions\DeclineEnvelope;
 use App\Actions\RotateSigningCode;
 use App\Actions\RotateSigningInvitation;
@@ -32,7 +33,6 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
-use App\Actions\CreateDraftEnvelope;
 
 it('commits multi-signer invitation state before handoff and rotates an unknown generation', function (): void {
     [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
