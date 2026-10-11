@@ -12,6 +12,47 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\PdfFixture;
 
+it('reconciles the signer roster: swaps addresses, re-applies order, deletes omissions, refuses foreign ids', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Roster envelope',
+        'document' => UploadedFile::fake()->createWithContent('roster.pdf', PdfFixture::make()),
+    ])->assertRedirect();
+    $envelope = Envelope::query()->latest('id')->firstOrFail();
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['name' => 'First Signer', 'email' => 'first@example.test'],
+        ['name' => 'Second Signer', 'email' => 'second@example.test'],
+    ]])->assertRedirect();
+    $original = $envelope->signers()->orderBy('position')->pluck('id', 'email');
+    $other = Envelope::factory()->forOwner($envelope->team, $user)->create();
+    $foreignSigner = $other->signers()->create(['name' => 'Foreign', 'email' => 'foreign@example.test']);
+
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['id' => $original->get('second@example.test'), 'name' => 'Second Renamed', 'email' => 'first@example.test'],
+        ['id' => $original->get('first@example.test'), 'name' => 'First Renamed', 'email' => 'second@example.test'],
+    ]])->assertRedirect();
+
+    $roster = $envelope->signers()->get();
+    expect($roster->pluck('position', 'email')->all())->toBe([
+        'first@example.test' => 0,
+        'second@example.test' => 1,
+    ])
+        ->and($roster->sortBy('position')->pluck('name')->all())->toBe(['Second Renamed', 'First Renamed'])
+        ->and($roster->where('email', 'first@example.test')->first()->getKey())->toBe($original->get('second@example.test'))
+        ->and($envelope->signers()->where('email', 'like', '%@invalid.test')->count())->toBe(0);
+
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['id' => $original->get('second@example.test'), 'name' => 'Second Renamed', 'email' => 'first@example.test'],
+    ]])->assertRedirect();
+    expect($envelope->signers()->count())->toBe(1)
+        ->and($envelope->signers()->first()->position)->toBe(0);
+
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['id' => $foreignSigner->getKey(), 'name' => 'Smuggled', 'email' => 'smuggled@example.test'],
+    ]])->assertNotFound();
+});
+
 it('drives the two-signer sender happy path twice and makes duplicate send idempotent', function (): void {
     Storage::fake('local');
     $user = UserFactory::new()->create();

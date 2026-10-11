@@ -64,6 +64,9 @@ abstract class McpDeploymentContextRouteTestCase extends TestCase
 
         self::assertSame($issuer, config('built-for-cloud.console.issuer'));
         self::assertSame($audience, config('built-for-cloud.console.audience'));
+        if ($managedAudience !== '') {
+            self::assertSame($managedAudience, config('built-for-cloud.console.audience'), 'The managed console audience must override the per-install derivation.');
+        }
         self::assertSame($delegated, config('built-for-cloud.mcp.delegated'));
         $this->getJson('/bfc/meta')->assertOk()->assertJsonPath(
             'capabilities',
