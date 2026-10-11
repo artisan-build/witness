@@ -27,6 +27,7 @@ use App\Services\EnvelopeCompletionService;
 use App\Services\OutboundMailDelivery;
 use App\Services\PdfCompletionRenderer;
 use App\Services\PdfFontCoverage;
+use App\Support\CanonicalJson;
 use ArtisanBuild\BuiltForCloud\SystemAuthorityContext;
 use ArtisanBuild\BuiltForCloud\User;
 use Com\Tecnick\Pdf\Import\ImportUnsupportedFeatureException;
@@ -681,6 +682,76 @@ it('removes the stored candidate when completion fails after storing it', functi
         ->filter(fn (string $path): bool => str_contains($path, '/completed/'))->values()->all())
         ->toBe([])
         ->and(resolve(EnvelopeCompletionService::class)->complete($envelope->getKey()))->toBeNull();
+});
+
+it('strips ancillary PNG payload from drawn signatures before the final artifact', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $image = imagecreatetruecolor(6, 6);
+    $white = imagecolorallocate($image, 255, 255, 255);
+    imagefill($image, 0, 0, $white);
+    ob_start();
+    imagepng($image);
+    $base = ob_get_clean();
+    imagedestroy($image);
+
+    $payload = '<script>alert(1)</script>';
+    $typeData = 'tEXt'."Comment\x00".$payload;
+    $chunk = pack('N', strlen($typeData) - 4).$typeData.pack('N', crc32($typeData));
+    $iend = strrpos($base, 'IEND') - 4;
+    $withPayload = substr($base, 0, $iend).$chunk.substr($base, $iend);
+    $png = 'data:image/png;base64,'.base64_encode($withPayload);
+
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+    $field = $signer->fields()->firstOrFail();
+    resolve(SaveSignerFields::class)->handle($signer->refresh(), [
+        $field->getKey() => ['kind' => 'drawn', 'drawn' => $png],
+    ], '192.0.2.13', 'Ancillary test');
+    $stored = Storage::disk('local')->get($field->fresh()->value['path']);
+    expect($stored)->toContain($payload);
+
+    resolve(SignEnvelope::class)->handle($signer->refresh(), '192.0.2.13', 'Ancillary test');
+    Event::fake([EnvelopeReadyForCompletion::class]);
+    resolve(EnvelopeCompletionService::class)->complete((int) $envelope->getKey());
+
+    $final = Storage::get($envelope->document->fresh()->final_storage_path);
+    $inspector = new RenderedPdfInspector($final);
+
+    expect(str_contains($final, $payload))->toBeFalse()
+        ->and($inspector->imageRectangles(1))->toHaveCount(1);
+});
+
+it('hashes the final content over the truthful preimage with the pre-completion chain head', function (): void {
+    [$envelope, $signer, $completed] = completeFixtureEnvelope('classic-1.4-letter.pdf');
+    $chainHead = $envelope->auditEvents()->where('type', 'completed')->first()->payload['certificate_chain_head'];
+    $fields = $envelope->fields()->orderBy('id')->get()->groupBy('page')->flatten(1)->map(function ($field): array {
+        $value = $field->value ?? [];
+        if (($value['kind'] ?? null) === 'drawn') {
+            $value = ['kind' => 'drawn', 'sha256' => $value['sha256'] ?? null];
+        }
+
+        return [
+            'id' => $field->getKey(),
+            'page' => $field->page,
+            'type' => $field->type->value,
+            'x' => $field->position_x,
+            'y' => $field->position_y,
+            'width' => $field->width,
+            'height' => $field->height,
+            'value' => $value,
+        ];
+    })->values()->all();
+
+    $expected = hash('sha256', resolve(CanonicalJson::class)->encode([
+        'definition' => 'Witness final content v1: original SHA-256, displayed field responses, and pre-completion audit chain head.',
+        'envelope_id' => $envelope->getKey(),
+        'original_sha256' => $envelope->document->original_sha256,
+        'fields' => $fields,
+        'chain_head' => $chainHead,
+    ]));
+
+    expect($completed->contentSha256)->toBe($expected)
+        ->and($envelope->auditEvents()->where('type', 'completed')->first()->payload['final_content_sha256'])->toBe($expected);
 });
 
 it('leaves no completion state or delivery after failure and retries safely', function (): void {
