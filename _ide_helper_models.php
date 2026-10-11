@@ -450,4 +450,3 @@ namespace App\Models{
 	#[\AllowDynamicProperties]
 	class IdeHelperTemplateRole {}
 }
-
