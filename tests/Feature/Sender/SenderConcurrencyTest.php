@@ -445,8 +445,13 @@ it('autoprovisions exactly one personal team across concurrent first visits', fu
             $locker->rollBack();
         }
         if ($userId !== null) {
+            $statement = $setup->prepare('SELECT team_id FROM team_user WHERE user_id = ?');
+            $statement->execute([$userId]);
+            $teamIds = $statement->fetchAll(PDO::FETCH_COLUMN);
             $setup->prepare('DELETE FROM team_user WHERE user_id = ?')->execute([$userId]);
-            $setup->prepare('DELETE FROM teams WHERE id IN (SELECT team_id FROM team_user WHERE user_id = ?)')->execute([$userId]);
+            foreach ($teamIds as $teamId) {
+                $setup->prepare('DELETE FROM teams WHERE id = ?')->execute([$teamId]);
+            }
             $setup->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
         }
     }
