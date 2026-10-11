@@ -31,6 +31,32 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
+it('tells the owning sender when a rotated link handoff stays unknown', function (): void {
+    [$envelope, $signer, $oldToken] = createSigningEnvelope([FieldType::Signature]);
+    $mailManager = Mail::getFacadeRoot()->manager;
+    $pending = Mockery::mock(PendingMail::class);
+    $pending->shouldReceive('send')->once()->andReturnUsing(function (SigningInvitation $mail) use ($signer): void {
+        expect($signer->fresh()->mailDeliveries()
+            ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
+            ->firstOrFail()->status)->toBe(MailDeliveryStatus::Sending);
+        throw new RuntimeException('Ambiguous invitation handoff.');
+    });
+    Mail::shouldReceive('to')->once()->with($signer->email)->andReturn($pending);
+
+    $this->actingAsVersioned($envelope->sender)
+        ->withSession(['witness.team_id' => $envelope->team_id])
+        ->post(route('sender.envelopes.signers.resend-link', [$envelope, $signer]))
+        ->assertRedirect()
+        ->assertSessionHas('status', 'The mail handoff is unknown. The new link was not claimed as delivered.')
+        ->assertSessionHasNoErrors();
+
+    $deliveries = $signer->mailDeliveries()->orderBy('generation')->get();
+    expect($deliveries)->toHaveCount(2)
+        ->and($deliveries[1]->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($signer->fresh()->link_token_hash)->not->toBe(hash('sha256', $oldToken));
+    Mail::swap($mailManager);
+});
+
 it('commits multi-signer invitation state before handoff and rotates an unknown generation', function (): void {
     [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
     $secondSigner = $envelope->signers()->create([
