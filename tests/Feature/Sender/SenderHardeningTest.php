@@ -72,6 +72,42 @@ it('refuses an incomplete draft inside the locked send action', function (): voi
         ->and($envelope->auditEvents()->count())->toBe(0);
 });
 
+it('refuses every sender write route with 409 once the envelope leaves draft', function (): void {
+    Storage::fake('local');
+    [$team, $sender, $envelope, $signer] = createHardenedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $before = [
+        'envelope' => $envelope->fresh(['document'])->toArray(),
+        'signers' => $envelope->signers()->orderBy('position')->get()->each(fn ($s) => $s->makeHidden(['link_token_hash']))->toArray(),
+        'fields' => $envelope->fields()->count(),
+        'templates' => Template::query()->count(),
+        'files' => Storage::allFiles(),
+    ];
+
+    $requests = [
+        ['PUT', route('sender.envelopes.update', $envelope), ['title' => 'Changed', 'message' => 'Changed', 'expires_at' => null]],
+        ['PUT', route('sender.envelopes.document', $envelope), ['document' => UploadedFile::fake()->createWithContent('replacement.pdf', PdfFixture::make())]],
+        ['PUT', route('sender.envelopes.signers', $envelope), ['signers' => [['name' => 'New signer', 'email' => 'new@example.test', 'role_label' => 'Client']]]],
+        ['PUT', route('sender.envelopes.fields', $envelope), ['fields_json' => '[]']],
+        ['POST', route('sender.envelopes.template', $envelope), ['name' => 'Too late template']],
+    ];
+
+    $this->actingAsVersioned($sender)->withSession(['witness.team_id' => $team->getKey()]);
+    foreach ($requests as [$method, $uri, $payload]) {
+        (match ($method) {
+            'PUT' => $this->put($uri, $payload),
+            'POST' => $this->post($uri, $payload),
+        })->assertStatus(409);
+    }
+
+    expect($envelope->fresh(['document'])->toArray())->toBe($before['envelope'])
+        ->and($envelope->signers()->orderBy('position')->get()->each(fn ($s) => $s->makeHidden(['link_token_hash']))->toArray())->toBe($before['signers'])
+        ->and($envelope->fields()->count())->toBe($before['fields'])
+        ->and(Template::query()->count())->toBe($before['templates'])
+        ->and(Storage::allFiles())->toBe($before['files']);
+});
+
 it('freezes envelope definitions and reserves signer progress for domain actions', function (): void {
     [$team, $sender, $envelope, $signer] = createHardenedEnvelope();
     resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
