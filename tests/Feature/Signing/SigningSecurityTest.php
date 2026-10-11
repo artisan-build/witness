@@ -791,3 +791,29 @@ it('stamps the durable decline exactly once', function (): void {
         ->and($signer->fresh()->decline_reason)->toBe('No.')
         ->and($signer->fresh()->declined_at)->not->toBeNull();
 });
+
+it('keeps a rejected decline reason and a token-bearing input out of the flashed old input', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+
+    // max:2000 is the only bound on the decline reason and the textarea's maxlength is
+    // client-side only, so a signer can post a reason the validator rejects. The uncaught
+    // ValidationException reaches the framework handler, which flashes every input key the
+    // dontFlash list does not name.
+    $rejected = 'LAIDOFF '.str_repeat('a', 2000);
+
+    $this->post(route('sign.decline'), ['reason' => $rejected])
+        ->assertSessionHasErrors('reason');
+
+    expect(session('_old_input.reason'))->toBeNull()
+        ->and(json_encode(session('_old_input') ?? [], JSON_THROW_ON_ERROR))->not->toContain('LAIDOFF')
+        ->and($signer->fresh()->status)->not->toBe(SignerStatus::Declined)
+        ->and($signer->fresh()->decline_reason)->toBeNull();
+
+    $this->post(route('sign.decline').'?token='.$token, [])
+        ->assertSessionHasErrors('reason');
+
+    expect(session('_old_input.token'))->toBeNull()
+        ->and(json_encode(session('_old_input') ?? [], JSON_THROW_ON_ERROR))->not->toContain($token);
+});
