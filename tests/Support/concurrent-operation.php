@@ -49,7 +49,7 @@ try {
         'team-autoprovision' => (function () use ($user): Response {
             $request = Request::create('/sender/dashboard', 'GET');
             $request->setUserResolver(static fn (): User => $user);
-            $request->setLaravelSession(app('session.store'));
+            $request->setLaravelSession(resolve('session.store'));
 
             return resolve(EnsureSelectedTeam::class)->handle(
                 $request,
