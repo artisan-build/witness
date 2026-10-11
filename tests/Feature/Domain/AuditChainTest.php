@@ -289,6 +289,32 @@ it('refuses audit event updates and deletes through the application model', func
         ->and(AuditEvent::query()->count())->toBe(3);
 });
 
+it('refuses every remaining builder and model mutation path on audit events', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+    $event = $envelope->auditEvents()->firstOrFail();
+
+    $event->user_agent = 'changed';
+
+    expect(fn () => $event->save())
+        ->toThrow(LogicException::class)
+        ->and(fn () => AuditEvent::query()->upsert(['id' => $event->getKey(), 'user_agent' => 'changed'], ['id']))
+        ->toThrow(LogicException::class)
+        ->and(fn () => AuditEvent::query()->increment('sequence'))
+        ->toThrow(LogicException::class)
+        ->and(fn () => AuditEvent::query()->decrement('sequence'))
+        ->toThrow(LogicException::class)
+        ->and(fn () => AuditEvent::query()->touch())
+        ->toThrow(LogicException::class)
+        ->and(fn () => AuditEvent::query()->forceDelete())
+        ->toThrow(LogicException::class)
+        ->and(fn () => $envelope->auditEvents()->update(['user_agent' => 'changed']))
+        ->toThrow(LogicException::class)
+        ->and(AuditEvent::query()->count())->toBe(3)
+        ->and(AuditEvent::query()->whereKey($event->getKey())->firstOrFail()->user_agent)
+        ->toBe('Witness test agent');
+});
+
 it('defines every PRD audit event type', function (): void {
     expect(array_map(
         static fn (AuditEventType $type): string => $type->value,
