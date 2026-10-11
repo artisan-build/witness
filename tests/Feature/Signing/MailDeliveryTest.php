@@ -728,3 +728,59 @@ it('does not rotate a scheduled reminder for an envelope without a reminder inte
         ->and($envelope->fresh()->last_reminded_at)->toBeNull();
     Mail::assertSent(SigningInvitation::class, 1);
 });
+
+it('trims the decline reason and refuses empty over-long or tagged input at the action boundary', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+
+    resolve(DeclineEnvelope::class)->handle($signer, '  Terms are unreasonable.  ', '192.0.2.9', 'Hygiene test');
+
+    expect($signer->fresh()->status)->toBe(SignerStatus::Declined)
+        ->and($signer->fresh()->decline_reason)->toBe('Terms are unreasonable.')
+        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Declined);
+
+    [$second, $secondSigner, $secondToken] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $secondToken);
+    $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect();
+
+    expect(fn () => resolve(DeclineEnvelope::class)->handle($secondSigner, str_repeat('a', 2001), null, null))
+        ->toThrow(ValidationException::class)
+        ->and(fn () => resolve(DeclineEnvelope::class)->handle($secondSigner->refresh(), '<b>No deal</b>', null, null))
+        ->toThrow(ValidationException::class)
+        ->and(fn () => resolve(DeclineEnvelope::class)->handle($secondSigner->refresh(), '   ', null, null))
+        ->toThrow(ValidationException::class)
+        ->and($secondSigner->fresh()->status)->toBe(SignerStatus::Viewed)
+        ->and($secondSigner->fresh()->decline_reason)->toBeNull()
+        ->and($second->fresh()->status)->toBe(EnvelopeStatus::Sent);
+});
+
+it('routes invitation code and decline mail through the default mailer with the sender as reply-to', function (): void {
+    [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    openAndVerifySigner($this, $token);
+    $this->post(route('sign.decline'), ['reason' => 'Terms do not match.'])->assertOk();
+
+    $senderAddress = $envelope->sender->email;
+    $senderName = $envelope->sender->name;
+
+    foreach ([SigningInvitation::class, SigningCode::class, SigningDeclined::class] as $mailable) {
+        Mail::assertSent($mailable, function (object $mail) use ($senderAddress, $senderName): bool {
+            $metadata = $mail->envelope();
+
+            return $metadata->from?->address === (string) config('mail.from.address')
+                && $metadata->from?->name === $senderName.' via Witness'
+                && $metadata->replyTo[0]->address === $senderAddress
+                && $metadata->replyTo[0]->name === $senderName;
+        });
+    }
+
+    foreach ([
+        new SigningInvitation($envelope, $signer, 'probe-token'),
+        new SigningCode($envelope, $signer, 'probe-code'),
+        new SigningDeclined($envelope, $signer, 'probe-reason'),
+    ] as $mailable) {
+        expect($mailable->mailer)->toBeNull()
+            ->and($mailable->usesMailer('log'))->toBeFalse()
+            ->and($mailable->usesMailer('smtp'))->toBeFalse();
+    }
+});
