@@ -30,6 +30,40 @@ it('creates a personal team and stores inspected PDF bytes privately', function 
     expect(Storage::disk('local')->get($envelope->document->storage_path))->toBe($pdf);
 });
 
+it('stores each upload at a fresh random private path', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $paths = [];
+
+    foreach (['First random upload', 'Second random upload'] as $title) {
+        $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+            'title' => $title,
+            'document' => UploadedFile::fake()->createWithContent('upload.pdf', PdfFixture::make(1)),
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $paths[] = Envelope::query()->where('title', $title)->sole()->document->storage_path;
+    }
+
+    $pattern = '/^documents\/\d+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.pdf$/';
+
+    expect($paths[0])->toMatch($pattern)
+        ->and($paths[1])->toMatch($pattern)
+        ->and($paths[0])->not->toBe($paths[1])
+        ->and(Storage::disk('local')->getVisibility($paths[0]))->toBe('private')
+        ->and(Storage::disk('local')->getVisibility($paths[1]))->toBe('private');
+});
+
+it('accepts a PDF at the one hundred page boundary', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Boundary page count',
+        'document' => UploadedFile::fake()->createWithContent('boundary.pdf', PdfFixture::make(100)),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect(Envelope::query()->sole()->document->page_count)->toBe(100);
+});
+
 it('rejects spoofed encrypted empty too-large and over-page-limit uploads without storing them', function (UploadedFile $file, string $message): void {
     Storage::fake('local');
     $user = UserFactory::new()->create();
