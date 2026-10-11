@@ -477,19 +477,19 @@ it('cannot replay a code after it has been verified and resets attempts', functi
 function boundTokenSession(Signer $signer, string $tokenHash): Request
 {
     $request = Request::create('/sign');
-    $request->setLaravelSession(app('session.store'));
-    app(SigningSession::class)->bind($request, $signer, $tokenHash);
+    $request->setLaravelSession(resolve('session.store'));
+    resolve(SigningSession::class)->bind($request, $signer, $tokenHash);
 
     return $request;
 }
 
 it('binds and regenerates token-bound sessions and forgets tampered or invalid bindings', function (): void {
     [$envelope, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
-    $session = app(SigningSession::class);
+    $session = resolve(SigningSession::class);
     $tokenHash = hash('sha256', $token);
 
     $request = Request::create('/sign');
-    $request->setLaravelSession(app('session.store'));
+    $request->setLaravelSession(resolve('session.store'));
     $idBeforeBind = $request->session()->getId();
     $session->bind($request, $signer, $tokenHash);
 
@@ -511,7 +511,7 @@ it('denies sessions on draft and expired envelopes', function (): void {
 
     $draft = Envelope::factory()->forOwner($team, $sender)->create(['title' => 'Draft session']);
     $draftSigner = Signer::factory()->for($draft)->create(['link_token_hash' => hash('sha256', 'draft-token')]);
-    $session = app(SigningSession::class);
+    $session = resolve(SigningSession::class);
     $draftRequest = boundTokenSession($draftSigner, hash('sha256', 'draft-token'));
     expect(fn () => $session->signer($draftRequest))->toThrow(SigningAccessDenied::class);
 
@@ -548,7 +548,7 @@ it('returns the neutral surface once the signer has declined', function (): void
     expect($signer->fresh()->status)->toBe(SignerStatus::Declined);
 
     $terminalRequest = boundTokenSession($signer->fresh(), hash('sha256', $token));
-    expect(fn () => app(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
+    expect(fn () => resolve(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
 
     $this->get(route('sign.show'))
         ->assertOk()
@@ -569,7 +569,7 @@ it('returns the neutral surface once the signer has signed', function (): void {
     expect($signer->fresh()->status)->toBe(SignerStatus::Signed);
 
     $terminalRequest = boundTokenSession($signer->fresh(), hash('sha256', $token));
-    expect(fn () => app(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
+    expect(fn () => resolve(SigningSession::class)->signer($terminalRequest))->toThrow(SigningAccessDenied::class);
 
     $this->get(route('sign.show'))
         ->assertOk()
