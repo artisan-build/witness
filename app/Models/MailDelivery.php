@@ -14,7 +14,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property MailDeliveryPurpose $purpose
  * @property MailDeliveryStatus $status
  * @property CarbonImmutable|null $attempted_at
- *
  * @mixin IdeHelperMailDelivery
  */
 class MailDelivery extends Model
