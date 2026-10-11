@@ -148,6 +148,44 @@ it('binds template fields to stable roles without signer rows', function (): voi
         ->and(Signer::query()->count())->toBe(0);
 });
 
+it('derives a template field template from its role and refuses a foreign role', function (): void {
+    $templateA = Template::factory()->create(['name' => 'Role template A']);
+    $templateB = Template::factory()->create(['name' => 'Role template B']);
+    $roleA = TemplateRole::factory()->for($templateA)->create(['label' => 'Client A', 'position' => 1]);
+    $foreignRole = TemplateRole::factory()->for($templateB)->create(['label' => 'Client B', 'position' => 1]);
+
+    $derived = new TemplateField([
+        'page' => 1,
+        'type' => FieldType::Signature,
+        'required' => true,
+        'position_x' => '0.1000000000',
+        'position_y' => '0.1000000000',
+        'width' => '0.3000000000',
+        'height' => '0.1000000000',
+    ]);
+    $derived->template_role_id = $roleA->getKey();
+    $derived->save();
+
+    expect($derived->fresh()->template_id)->toBe($templateA->getKey())
+        ->and($derived->fresh()->role->is($roleA))->toBeTrue();
+
+    $forged = new TemplateField([
+        'page' => 1,
+        'type' => FieldType::Signature,
+        'required' => true,
+        'position_x' => '0.1000000000',
+        'position_y' => '0.1000000000',
+        'width' => '0.3000000000',
+        'height' => '0.1000000000',
+    ]);
+    $forged->template_role_id = $foreignRole->getKey();
+    $forged->template_id = $templateA->getKey();
+
+    expect(fn () => $forged->save())
+        ->toThrow(DomainException::class, 'A template field role must belong to the same template.')
+        ->and(TemplateField::query()->whereKey($forged->getKey() ?? 0)->exists())->toBeFalse();
+});
+
 it('allows the same signer email on multiple envelopes from one sender', function (): void {
     $team = Team::factory()->create();
     $sender = UserFactory::new()->create();
