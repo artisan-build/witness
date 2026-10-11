@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 use App\Actions\CreateDraftEnvelope;
 use App\Actions\DeclineEnvelope;
-use App\Actions\RecordSigningConsent;
 use App\Actions\OpenSigningLink;
+use App\Actions\RecordSigningConsent;
 use App\Actions\SaveSignerFields;
 use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
