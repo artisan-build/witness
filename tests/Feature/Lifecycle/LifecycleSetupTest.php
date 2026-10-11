@@ -408,6 +408,59 @@ it('refuses reissuing when the latest final-document generation is not a success
         ->toBe([MailDeliveryStatus::Sent, MailDeliveryStatus::Pending]);
 });
 
+it('converts wrong-state final-delivery refusals into handled neutral session errors', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.field_response_write = 'on'");
+        DB::table('fields')->where('signer_id', $signer->getKey())->update([
+            'value' => json_encode(['kind' => 'typed', 'text' => 'Alex Signer'], JSON_THROW_ON_ERROR),
+            'completed_at' => now(),
+        ]);
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        DB::table('signers')->where('id', $signer->getKey())->update(['status' => SignerStatus::Signed->value, 'signed_at' => now()]);
+    });
+    resolve(EnvelopeCompletionService::class)->complete((int) $envelope->getKey());
+    $sent = $signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->sole();
+    $request = fn () => $this->actingAsVersioned($envelope->sender)->withSession(['witness.team_id' => $envelope->team_id]);
+
+    $request()->post(route('sender.envelopes.deliveries.resend', [$envelope, $sent]), ['confirm_duplicate_risk' => '1'])
+        ->assertRedirect()
+        ->assertSessionHasErrors('resend')
+        ->assertSessionMissing('status');
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->count())->toBe(1);
+
+    $request()->post(route('sender.envelopes.deliveries.reissue-link', [$envelope, $sent]))
+        ->assertRedirect()
+        ->assertSessionHas('status');
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->count())->toBe(2);
+
+    $request()->post(route('sender.envelopes.deliveries.reissue-link', [$envelope, $sent]))
+        ->assertRedirect()
+        ->assertSessionHasErrors('reissue')
+        ->assertSessionMissing('status');
+    expect($signer->mailDeliveries()->where('purpose', MailDeliveryPurpose::FinalDocument)->count())->toBe(2);
+});
+
+it('converts wrong-state destructive refusals into handled neutral session errors', function (): void {
+    [$draft] = createSigningEnvelope([FieldType::Signature], false);
+    [$sent] = createSigningEnvelope([FieldType::Signature]);
+    $originalPath = $sent->document->storage_path;
+    $request = fn (Envelope $envelope) => $this->actingAsVersioned($envelope->sender)->withSession(['witness.team_id' => $envelope->team_id]);
+
+    $request($draft)->post(route('sender.envelopes.void', $draft), ['reason' => 'Wrong state'])
+        ->assertRedirect()
+        ->assertSessionHasErrors('void')
+        ->assertSessionMissing('status');
+    expect($draft->fresh()->status)->toBe(EnvelopeStatus::Draft);
+
+    $request($sent)->delete(route('sender.envelopes.destroy', $sent), ['confirmation' => 'DELETE'])
+        ->assertRedirect()
+        ->assertSessionHasErrors('delete')
+        ->assertSessionMissing('status');
+    expect($sent->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and(Storage::disk('local')->exists($originalPath))->toBeTrue();
+});
+
 it('purges a terminal aggregate and all private and Verbs material under the exact envelope setting', function (): void {
     [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
     $originalPath = $envelope->document->storage_path;

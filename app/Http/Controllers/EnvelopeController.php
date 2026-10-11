@@ -291,7 +291,12 @@ final readonly class EnvelopeController
     public function void(Request $request, int $envelope): RedirectResponse
     {
         $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
-        $this->voidEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope, $data['reason']);
+
+        try {
+            $this->voidEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope, $data['reason']);
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['void' => $exception->getMessage()]);
+        }
 
         return back()->with('status', 'Envelope voided. Sender notification was attempted.');
     }
@@ -310,24 +315,33 @@ final readonly class EnvelopeController
     public function resendUnknown(Request $request, int $envelope, int $delivery): RedirectResponse
     {
         $request->validate(['confirm_duplicate_risk' => ['accepted']]);
-        $this->completion->resendUnknown(
-            $this->selectedTeam->get(),
-            $this->user($request),
-            $envelope,
-            $delivery,
-        );
+
+        try {
+            $this->completion->resendUnknown(
+                $this->selectedTeam->get(),
+                $this->user($request),
+                $envelope,
+                $delivery,
+            );
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['resend' => $exception->getMessage()]);
+        }
 
         return back()->with('status', 'A new final-document delivery generation was attempted.');
     }
 
     public function reissueFinalLink(Request $request, int $envelope, int $delivery): RedirectResponse
     {
-        $delivered = $this->completion->reissueSent(
-            $this->selectedTeam->get(),
-            $this->user($request),
-            $envelope,
-            $delivery,
-        );
+        try {
+            $delivered = $this->completion->reissueSent(
+                $this->selectedTeam->get(),
+                $this->user($request),
+                $envelope,
+                $delivery,
+            );
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['reissue' => $exception->getMessage()]);
+        }
 
         return back()->with('status', $delivered
             ? 'A fresh final-document link was handed to the configured mailer.'
@@ -345,7 +359,12 @@ final readonly class EnvelopeController
     public function destroy(Request $request, int $envelope): RedirectResponse
     {
         $request->validate(['confirmation' => ['required', 'in:DELETE']]);
-        $this->purgeEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+
+        try {
+            $this->purgeEnvelope->handle($this->selectedTeam->get(), $this->user($request), $envelope);
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['delete' => $exception->getMessage()]);
+        }
 
         return to_route('sender.dashboard')->with('status', 'Envelope and its private files were deleted.');
     }
