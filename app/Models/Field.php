@@ -53,7 +53,6 @@ class Field extends Model
         });
         static::updating(function (Field $field): void {
             $field->assertUpdateAllowed();
-            $field->assertSignerBelongsToEnvelope();
         });
         static::deleting(fn (Field $field) => $field->assertDraftEnvelope());
     }
