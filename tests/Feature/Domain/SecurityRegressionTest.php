@@ -81,6 +81,8 @@ it('roots genesis in the document hash frozen at send', function (): void {
 
     expect($events)->toHaveCount(3)
         ->and($events->first()->occurred_at->equalTo($envelope->created_at))->toBeTrue()
+        ->and($events->first()->ip_address)->toBe($envelope->created_ip_address)
+        ->and($events->first()->user_agent)->toBe($envelope->created_user_agent)
         ->and($result->valid)->toBeTrue();
 });
 
