@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\CreateDraftEnvelope;
 use App\Actions\SendEnvelope;
 use App\Enums\EnvelopeStatus;
+use App\Enums\FieldType;
 use App\Enums\SignerStatus;
 use App\Models\Envelope;
 use App\Models\PendingFileDeletion;
@@ -23,6 +24,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\PdfFixture;
 
+/**
+ * Creates a team, sender, draft envelope, signer, and required signature field.
+ * Pass `complete: false` to skip the signer, field, and audit-seeding steps — the
+ * returned envelope has NO signer at all, so tests must create their own.
+ */
 function createHardenedEnvelope(bool $complete = true): array
 {
     $team = Team::factory()->create();
@@ -67,6 +73,26 @@ it('refuses an incomplete draft inside the locked send action', function (): voi
 
     expect(fn () => resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey()))
         ->toThrow(DomainException::class, 'at least one signer');
+
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
+        ->and($envelope->auditEvents()->count())->toBe(0);
+
+    $signer = $envelope->signers()->create([
+        'name' => 'Late Signer',
+        'email' => 'late-signer@example.test',
+    ]);
+    $signer->fields()->create([
+        'page' => 1,
+        'type' => FieldType::Text->value,
+        'required' => true,
+        'position_x' => .1,
+        'position_y' => .5,
+        'width' => .2,
+        'height' => .05,
+    ]);
+
+    expect(fn () => resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey()))
+        ->toThrow(DomainException::class, 'required signature or initials');
 
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
         ->and($envelope->auditEvents()->count())->toBe(0);
@@ -182,6 +208,29 @@ it('returns a controlled conflict before storing for a document-less draft', fun
 
     expect(Storage::disk('local')->allFiles())->toBe([])
         ->and($envelope->document()->exists())->toBeFalse();
+});
+
+it('deletes the just-stored pdf when the replacement transaction fails', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Failed replacement',
+        'document' => UploadedFile::fake()->createWithContent('base.pdf', PdfFixture::make()),
+    ]);
+    $envelope = Envelope::query()->firstOrFail();
+    $before = count(Storage::disk('local')->allFiles());
+
+    DB::listen(function (QueryExecuted $query): void {
+        if (str_starts_with($query->sql, 'update "documents"')) {
+            throw new RuntimeException('Forced replacement failure.');
+        }
+    });
+
+    $this->put(route('sender.envelopes.document', $envelope), [
+        'document' => UploadedFile::fake()->createWithContent('replacement.pdf', PdfFixture::make()),
+    ]);
+
+    expect(count(Storage::disk('local')->allFiles()))->toBe($before);
 });
 
 it('durably records failed deletion and retries on the recorded disk', function (): void {
