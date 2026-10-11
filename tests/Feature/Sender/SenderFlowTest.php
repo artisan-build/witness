@@ -7,6 +7,7 @@ use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Models\Envelope;
 use App\Models\Team;
+use App\Models\Template;
 use Database\Factories\UserFactory;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -33,7 +34,7 @@ it('reconciles the signer roster: swaps addresses, re-applies order, deletes omi
         ['id' => $original->get('first@example.test'), 'name' => 'First Renamed', 'email' => 'second@example.test'],
     ]])->assertRedirect();
 
-    $roster = $envelope->signers()->get();
+    $roster = $envelope->signers()->orderBy('position')->get();
     expect($roster->pluck('position', 'email')->all())->toBe([
         'first@example.test' => 0,
         'second@example.test' => 1,
@@ -123,6 +124,8 @@ it('rejects invalid placement ownership geometry pages and incomplete send requi
         ['position_x' => .9, 'width' => .2],
         ['position_y' => .95, 'height' => .1],
         ['page' => 2],
+        ['page' => 0],
+        ['type' => 'credit_card'],
         ['assignee_id' => $otherSigner->getKey()],
     ] as $change) {
         $this->put(route('sender.envelopes.fields', $envelope), [
@@ -135,6 +138,76 @@ it('rejects invalid placement ownership geometry pages and incomplete send requi
     ])->assertRedirect();
     $this->post(route('sender.envelopes.send', $envelope))->assertSessionHasErrors('send');
     expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft);
+});
+
+it('accepts boundary-exact placement geometry and replaces prior placements on re-save', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Boundary placement',
+        'document' => UploadedFile::fake()->createWithContent('boundary.pdf', PdfFixture::make(2)),
+    ])->assertRedirect();
+    $envelope = Envelope::query()->latest('id')->firstOrFail();
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['name' => 'Sole Signer', 'email' => 'sole@example.test'],
+    ]])->assertRedirect();
+    $signer = $envelope->signers()->firstOrFail();
+
+    $edge = ['assignee_id' => $signer->getKey(), 'page' => 1, 'type' => 'signature', 'required' => true, 'position_x' => .8, 'position_y' => .9, 'width' => .2, 'height' => .1];
+    $this->put(route('sender.envelopes.fields', $envelope), [
+        'fields_json' => json_encode([$edge], JSON_THROW_ON_ERROR),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($envelope->fields()->count())->toBe(1)
+        ->and($envelope->fields()->firstOrFail()->position_x)->toBe('0.8000000000')
+        ->and($envelope->fields()->firstOrFail()->position_y)->toBe('0.9000000000');
+
+    $replacement = ['assignee_id' => $signer->getKey(), 'page' => 2, 'type' => 'initials', 'required' => false, 'position_x' => .1, 'position_y' => .1, 'width' => .1, 'height' => .1];
+    $this->put(route('sender.envelopes.fields', $envelope), [
+        'fields_json' => json_encode([$replacement], JSON_THROW_ON_ERROR),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($envelope->fields()->count())->toBe(1)
+        ->and($envelope->fields()->firstOrFail()->page)->toBe(2)
+        ->and($envelope->fields()->firstOrFail()->type)->toBe(FieldType::Initials);
+});
+
+it('captures a draft as a template with deduped roles a copied document and mapped fields', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $pdf = PdfFixture::make(2);
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Capture me',
+        'document' => UploadedFile::fake()->createWithContent('capture.pdf', $pdf),
+    ])->assertRedirect();
+    $envelope = Envelope::query()->latest('id')->firstOrFail();
+    $this->put(route('sender.envelopes.signers', $envelope), ['signers' => [
+        ['name' => 'Alex Client', 'email' => 'alex@example.test', 'role_label' => 'Client'],
+        ['name' => 'Casey Client', 'email' => 'casey@example.test', 'role_label' => 'Client'],
+        ['name' => 'C Person', 'email' => 'cperson@example.test'],
+    ]])->assertRedirect();
+    $signers = $envelope->signers()->orderBy('position')->get();
+    $fields = [
+        ['assignee_id' => $signers[0]->getKey(), 'page' => 1, 'type' => 'signature', 'required' => true, 'position_x' => .1, 'position_y' => .1, 'width' => .25, 'height' => .08],
+        ['assignee_id' => $signers[1]->getKey(), 'page' => 2, 'type' => 'text', 'required' => false, 'position_x' => .62, 'position_y' => .72, 'width' => .2, 'height' => .08],
+        ['assignee_id' => $signers[2]->getKey(), 'page' => 1, 'type' => 'date_signed', 'required' => true, 'position_x' => .3, 'position_y' => .4, 'width' => .2, 'height' => .05],
+    ];
+    $this->put(route('sender.envelopes.fields', $envelope), ['fields_json' => json_encode($fields, JSON_THROW_ON_ERROR)])->assertRedirect();
+    $draftFields = $envelope->fields()->orderBy('id')->get()->map->only(['page', 'type', 'required', 'position_x', 'position_y', 'width', 'height'])->values()->all();
+
+    $this->post(route('sender.envelopes.template', $envelope), ['name' => 'Captured NDA'])->assertRedirect();
+
+    $template = Template::query()->where('name', 'Captured NDA')->firstOrFail();
+    $roles = $template->roles()->orderBy('position')->get();
+    expect($roles->pluck('label')->all())->toBe(['Client', 'Client 2', 'C Person'])
+        ->and($roles->pluck('position')->all())->toBe([0, 1, 2])
+        ->and($template->storage_path)->not->toBe($envelope->document->storage_path)
+        ->and(Storage::get($template->storage_path))->toBe($pdf)
+        ->and($template->page_count)->toBe($envelope->document->page_count)
+        ->and($template->original_sha256)->toBe($envelope->document->original_sha256)
+        ->and($template->fields()->orderBy('id')->get()->map->only(['page', 'type', 'required', 'position_x', 'position_y', 'width', 'height'])->values()->all())
+        ->toBe($draftFields)
+        ->and($envelope->fresh()->status)->toBe(EnvelopeStatus::Draft)
+        ->and($envelope->fields()->count())->toBe(3)
+        ->and(Storage::exists($envelope->document->storage_path))->toBeTrue();
 });
 
 it('requires explicit team selection and gives cross-team ids neutral not-found responses', function (): void {
