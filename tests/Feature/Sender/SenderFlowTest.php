@@ -231,3 +231,27 @@ it('requires explicit team selection and gives cross-team ids neutral not-found 
     $this->get(route('sender.envelopes.document.show', $envelopeA))->assertNotFound();
     $this->get(route('sender.envelopes.edit', $envelopeB))->assertOk();
 });
+
+it('refuses a session team the user is not a member of and falls back to the own team', function (): void {
+    Storage::fake('local');
+    $user = UserFactory::new()->create();
+    $own = Team::factory()->create(['name' => 'Own Team']);
+    $own->users()->attach($user);
+    $this->actingAsVersioned($user)->post(route('sender.envelopes.store'), [
+        'title' => 'Solo Draft',
+        'document' => UploadedFile::fake()->createWithContent('solo.pdf', PdfFixture::make()),
+    ])->assertRedirect();
+    $foreign = Team::factory()->create(['name' => 'Foreign Team']);
+    $foreign->users()->attach(UserFactory::new()->create());
+
+    $this->actingAsVersioned($user)->withSession(['witness.team_id' => $foreign->getKey()])
+        ->get(route('sender.dashboard'))->assertOk()->assertSee('Solo Draft');
+
+    $multiUser = UserFactory::new()->create();
+    $multiA = Team::factory()->create(['name' => 'Multi A']);
+    $multiB = Team::factory()->create(['name' => 'Multi B']);
+    $multiA->users()->attach($multiUser);
+    $multiB->users()->attach($multiUser);
+    $this->actingAsVersioned($multiUser)->withSession(['witness.team_id' => $foreign->getKey()])
+        ->get(route('sender.dashboard'))->assertRedirect(route('sender.teams.select'));
+});

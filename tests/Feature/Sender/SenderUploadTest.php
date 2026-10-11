@@ -77,6 +77,7 @@ it('rejects spoofed encrypted empty too-large and over-page-limit uploads withou
         ->and(Storage::disk('local')->allFiles())->toBe([]);
 })->with([
     'spoofed content' => [fn () => UploadedFile::fake()->createWithContent('spoof.pdf', 'not a pdf'), 'Choose a valid PDF document.'],
+    'empty bytes' => [fn () => UploadedFile::fake()->createWithContent('blank.pdf', ''), 'Choose a valid PDF document.'],
     'encrypted PDF' => [fn () => UploadedFile::fake()->createWithContent('encrypted.pdf', PdfFixture::make(1, true)), 'Encrypted or password-protected PDFs are not supported.'],
     'zero pages' => [fn () => UploadedFile::fake()->createWithContent('empty.pdf', PdfFixture::make(0)), 'The PDF must contain between 1 and 100 pages.'],
     'over 100 pages' => [fn () => UploadedFile::fake()->createWithContent('long.pdf', PdfFixture::make(101)), 'The PDF must contain between 1 and 100 pages.'],
