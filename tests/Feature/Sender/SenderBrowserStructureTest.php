@@ -129,6 +129,8 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->and($senderStyles)->toContain('input.witness-file-input::file-selector-button')
         ->and($senderStyles)->toContain('background:var(--w-rust)')
         ->and($senderStyles)->toContain('.witness-select')
+        ->and($senderStyles)->toContain('.witness-status-draft')
+        ->and($senderStyles)->toContain('.witness-status-sent')
         ->and($senderStyles)->toContain('.witness-status-completion_failed')
         ->and($senderStyles)->toContain('.witness-status-completed')
         ->and($senderStyles)->toContain('.witness-status-declined')
@@ -147,6 +149,15 @@ it('renders the real PDF placement structure with stable browser hooks and commi
             '<flux:button type="submit" variant="danger">Void envelope</flux:button>',
             'class="witness-stack witness-recovery"',
             'variant="danger" size="sm" data-testid="delete-envelope"',
+        )
+        ->and((string) file_get_contents(resource_path('views/livewire/sender/template-editor.blade.php')))->toContain(
+            '<flux:button :href="route(\'sender.templates.send-form\', $template)" variant="primary">Use template</flux:button>',
+            '<flux:button type="button" x-on:click="add()">Add role</flux:button>',
+            '<flux:button type="submit" variant="primary">Save roles</flux:button>',
+            'variant="primary" class="witness-button-full">Map signers</flux:button>',
+        )
+        ->and((string) file_get_contents(resource_path('views/sender/templates/index.blade.php')))->toContain(
+            '<a class="witness-button-secondary" href="{{ route(\'sender.templates.send-form\', $template) }}">Use template</a>',
         )
         ->and($canvasWidth)->toBeInt()
         ->and($canvasHeight)->toBeInt()
