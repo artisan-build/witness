@@ -6,6 +6,7 @@ use App\Actions\CreateDraftEnvelope;
 use App\Actions\DeclineEnvelope;
 use App\Actions\OpenSigningLink;
 use App\Actions\RecordSigningConsent;
+use App\Actions\RotateSigningCode;
 use App\Actions\SaveSignerFields;
 use App\Actions\SendEnvelope;
 use App\Actions\SignEnvelope;
@@ -13,6 +14,8 @@ use App\Actions\VerifySigningCode;
 use App\Enums\AuditEventType;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
+use App\Enums\MailDeliveryPurpose;
+use App\Enums\MailDeliveryStatus;
 use App\Enums\SignerStatus;
 use App\Events\EnvelopeReadyForCompletion;
 use App\Exceptions\SigningAccessDenied;
@@ -695,4 +698,81 @@ it('refuses to sign while a required checkbox is unchecked', function (): void {
 
     expect($signer->fresh()->status)->not->toBe(SignerStatus::Signed)
         ->and($envelope->auditEvents()->where('type', AuditEventType::Signed)->count())->toBe(0);
+});
+
+it('rotates only an unknown delivery for a viewed signer under the issue throttle', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    [, $pendingSigner] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+    $firstHash = $signer->fresh()->otp_hash;
+
+    expect(fn () => resolve(RotateSigningCode::class)->handle($pendingSigner->fresh(), '192.0.2.41', 'Rotate probe'))
+        ->toThrow(SigningAccessDenied::class);
+
+    $latest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    DB::table('mail_deliveries')->where('id', $latest->getKey())->update(['status' => MailDeliveryStatus::Sending->value, 'attempted_at' => now()->subMinutes(30)]);
+
+    $rotated = resolve(RotateSigningCode::class)->handle($signer->fresh(), '192.0.2.41', 'Rotate probe');
+
+    $newest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    expect($rotated)->toBeTrue()
+        ->and($latest->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($newest->fresh()->status)->toBe(MailDeliveryStatus::Sent)
+        ->and($signer->fresh()->otp_hash)->not->toBe($firstHash);
+    Mail::assertSent(SigningCode::class, 2);
+
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update(['otp_expires_at' => now()->subSecond()]);
+    });
+    $this->get(route('sign.open', $token))->assertRedirect();
+    Mail::assertSent(SigningCode::class, 3);
+
+    $latest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    DB::table('mail_deliveries')->where('id', $latest->getKey())->update(['status' => MailDeliveryStatus::Sending->value, 'attempted_at' => now()->subMinutes(30)]);
+    DB::transaction(function () use ($signer): void {
+        DB::statement("SET LOCAL witness.signer_progress_write = 'on'");
+        Signer::query()->whereKey($signer)->update(['otp_expires_at' => now()->subSecond()]);
+    });
+
+    try {
+        resolve(RotateSigningCode::class)->handle($signer->fresh(), '192.0.2.41', 'Rotate probe');
+        test()->fail('The fourth code issue was not throttled.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['code'][0])->toContain('Please wait');
+    }
+
+    Mail::assertSent(SigningCode::class, 3);
+});
+
+it('refuses code rotation while the latest delivery is a fresh sending handoff', function (): void {
+    [, $signer, $token] = createSigningEnvelope([FieldType::Signature]);
+    $this->get(route('sign.open', $token))->assertRedirect();
+    $hashBefore = $signer->fresh()->otp_hash;
+    $latest = $signer->fresh()->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningCode)
+        ->orderByDesc('generation')
+        ->firstOrFail();
+    DB::table('mail_deliveries')->where('id', $latest->getKey())->update(['status' => MailDeliveryStatus::Sending->value, 'attempted_at' => now()]);
+
+    try {
+        resolve(RotateSigningCode::class)->handle($signer->fresh(), '192.0.2.41', 'Rotation probe');
+        test()->fail('A fresh in-flight code delivery was rotated anyway.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors()['code'][0])->toContain('still in progress');
+    }
+
+    expect($signer->fresh()->otp_hash)->toBe($hashBefore)
+        ->and($latest->fresh()->status)->toBe(MailDeliveryStatus::Sending)
+        ->and($signer->fresh()->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode)->count())->toBe(1);
+    Mail::assertSent(SigningCode::class, 1);
 });

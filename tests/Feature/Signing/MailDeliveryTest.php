@@ -488,3 +488,36 @@ it('refuses code rotation while the latest delivery is a fresh sending handoff',
         ->and($signer->fresh()->mailDeliveries()->where('purpose', MailDeliveryPurpose::SigningCode->value)->count())->toBe(1);
     Mail::assertSent(SigningCode::class, 1);
 });
+
+it('leaves a fresh sending generation and stamps unknown_at on reconciled generations', function (): void {
+    [$envelope, $signer] = createSigningEnvelope([FieldType::Signature]);
+    $stalePending = $signer->mailDeliveries()
+        ->where('purpose', MailDeliveryPurpose::SigningInvitation->value)
+        ->firstOrFail();
+    $stalePending->update(['status' => MailDeliveryStatus::Pending, 'attempted_at' => null, 'sent_at' => null]);
+    DB::table('mail_deliveries')->where('id', $stalePending->getKey())->update([
+        'created_at' => now()->subMinutes(11),
+        'updated_at' => now()->subMinutes(11),
+    ]);
+    $staleSending = resolve(OutboundMailDelivery::class)->create($envelope, $signer, MailDeliveryPurpose::SigningCode);
+    $staleSending->update([
+        'status' => MailDeliveryStatus::Sending,
+        'attempted_at' => now()->subMinutes(11),
+    ]);
+    $freshSending = resolve(OutboundMailDelivery::class)->create($envelope, $signer, MailDeliveryPurpose::SigningCode);
+    $freshSending->update(['status' => MailDeliveryStatus::Sending]);
+
+    $event = collect(resolve(Schedule::class)->events())->first(
+        fn (mixed $event): bool => $event instanceof CallbackEvent
+            && $event->description === 'witness:cleanup-private-files',
+    );
+    assert($event instanceof CallbackEvent);
+    $event->run(app());
+
+    expect($stalePending->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($stalePending->fresh()->unknown_at)->not->toBeNull()
+        ->and($staleSending->fresh()->status)->toBe(MailDeliveryStatus::Unknown)
+        ->and($staleSending->fresh()->unknown_at)->not->toBeNull()
+        ->and($freshSending->fresh()->status)->toBe(MailDeliveryStatus::Sending)
+        ->and($freshSending->fresh()->unknown_at)->toBeNull();
+});
