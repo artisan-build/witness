@@ -12,6 +12,7 @@ use App\Enums\SignerStatus;
 use App\Events\EnvelopeReadyForCompletion;
 use App\Mail\SigningCode;
 use App\Mail\SigningInvitation;
+use App\Models\Signer;
 use App\Services\EnvelopeCompletionService;
 use App\Services\PdfCompletionRenderer;
 use Com\Tecnick\Pdf\Tcpdf;
@@ -131,6 +132,54 @@ it('completes and stamps every signer field type in the rendered PDF', function 
     $terminal = $this->get(route('sign.open', $token))->assertOk()->getContent();
     $invalid = $this->get(route('sign.open', str_repeat('x', 64)))->assertOk()->getContent();
     expect($terminal)->toBe($invalid)->not->toContain($token);
+});
+
+it('dispatches the completion event exactly once and only when the final signer signs', function (): void {
+    [$envelope, $firstSigner] = createSigningEnvelope([FieldType::Signature], false);
+    $secondSigner = $envelope->signers()->create([
+        'name' => 'Taylor Signer',
+        'email' => 'taylor-seam@example.test',
+        'position' => 1,
+    ]);
+    $secondSigner->fields()->create([
+        'page' => 1,
+        'type' => FieldType::Signature,
+        'required' => true,
+        'position_x' => .2,
+        'position_y' => .2,
+        'width' => .3,
+        'height' => .08,
+    ]);
+    resolve(SendEnvelope::class)->handle($envelope->team, $envelope->sender, $envelope->getKey());
+    $tokens = [];
+    Mail::assertSent(SigningInvitation::class, 2);
+    Mail::assertSent(SigningInvitation::class, function (SigningInvitation $mail) use (&$tokens): bool {
+        $tokens[$mail->signer->email] = $mail->linkToken;
+
+        return true;
+    });
+    Event::fake([EnvelopeReadyForCompletion::class]);
+
+    $sign = function (Signer $signer, string $token): void {
+        openAndVerifySigner($this, $token);
+        $this->post(route('sign.consent'), ['consent' => '1'])->assertRedirect(route('sign.show'));
+        $field = $signer->fields()->firstOrFail();
+        $this->post(route('sign.fields'), ['fields' => [
+            $field->getKey() => ['kind' => 'typed', 'typed' => $signer->name],
+        ]])->assertRedirect(route('sign.show'))->assertSessionHasNoErrors();
+        $this->post(route('sign.complete'), ['intent' => '1'])->assertOk();
+    };
+
+    $sign($firstSigner, $tokens[$firstSigner->email]);
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent);
+    Event::assertNotDispatched(EnvelopeReadyForCompletion::class);
+
+    $sign($secondSigner, $tokens[$secondSigner->email]);
+    resolve(SignEnvelope::class)->handle($firstSigner->refresh(), '192.0.2.20', 'Duplicate final sign');
+    Event::assertDispatchedTimes(EnvelopeReadyForCompletion::class, 1);
+    Event::assertDispatched(EnvelopeReadyForCompletion::class, fn ($event) => $event->envelopeId === $envelope->getKey());
+    expect($envelope->fresh()->status)->toBe(EnvelopeStatus::Sent)
+        ->and($envelope->auditEvents()->where('type', AuditEventType::Completed)->count())->toBe(0);
 });
 
 it('provisions and sends each signer link only once across duplicate send attempts', function (): void {
