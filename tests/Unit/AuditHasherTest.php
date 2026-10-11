@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Domain\Audit\AuditHasher;
+
+it('compares hashes for equality and refuses different hashes of any length', function (): void {
+    $hasher = resolve(AuditHasher::class);
+
+    expect($hasher->matches('same-bytes', 'same-bytes'))->toBeTrue()
+        ->and($hasher->matches('known-hash', 'known-hast'))->toBeFalse()
+        ->and($hasher->matches('short', 'a-much-longer-string'))->toBeFalse()
+        ->and($hasher->matches('', ''))->toBeTrue();
+});
+
+it('compares through the constant-time hash_equals primitive rather than a short-circuiting operator', function (): void {
+    $method = new ReflectionMethod(AuditHasher::class, 'matches');
+    $source = implode('', array_slice(
+        file($method->getFileName()),
+        $method->getStartLine() - 1,
+        $method->getEndLine() - $method->getStartLine() + 1,
+    ));
+    $body = trim(substr($source, (int) strpos($source, '{') + 1, strrpos($source, '}') - (int) strpos($source, '{') - 1));
+
+    expect(preg_replace('/\s+/', ' ', $body))->toBe('return hash_equals($knownHash, $calculatedHash);');
+});
+
+it('hashes each event over its predecessor hash concatenated with the canonical bytes', function (): void {
+    $hasher = resolve(AuditHasher::class);
+    $previous = str_repeat('ab', 32);
+    $canonical = '{"type":"sent","sequence":2}';
+
+    expect($hasher->eventHash($previous, $canonical))
+        ->toBe(hash('sha256', $previous.$canonical))
+        ->and($hasher->eventHash('one', $canonical))
+        ->not->toBe($hasher->eventHash('two', $canonical));
+});
