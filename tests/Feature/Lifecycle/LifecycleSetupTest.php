@@ -412,13 +412,20 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
         ->toThrow(ModelNotFoundException::class)
         ->and(Envelope::query()->whereKey($envelope)->exists())->toBeTrue();
 
+    $real = Storage::disk('local');
+    $deletes = [];
     $failing = Mockery::mock(Storage::disk('local'))->makePartial();
-    $failing->shouldReceive('delete')->with($finalPath)->once()->andReturnFalse();
+    $failing->shouldReceive('delete')->andReturnUsing(function (string $path) use ($real, &$deletes, $finalPath): bool {
+        $deletes[] = $path;
+
+        return $path === $finalPath ? false : $real->delete($path);
+    });
     Storage::set('local', $failing);
 
     resolve(PurgeEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey());
 
-    expect(Envelope::query()->find($envelope->getKey()))->toBeNull()
+    expect($deletes)->toBe([$originalPath, $finalPath, $drawnPath])
+        ->and(Envelope::query()->find($envelope->getKey()))->toBeNull()
         ->and(AuditEvent::query()->where('envelope_id', $envelope->getKey())->count())->toBe(0)
         ->and(DB::table('verb_events')->whereIn('id', $eventIds)->count())->toBe(0)
         ->and(DB::table('verb_state_events')->whereIn('event_id', $eventIds)->count())->toBe(0)
@@ -436,6 +443,17 @@ it('purges a terminal aggregate and all private and Verbs material under the exa
     Storage::assertMissing($finalPath);
     resolve(BrokersEvents::class)->replay();
     expect(PendingFileDeletion::query()->count())->toBe(0);
+});
+
+it('refuses purging an envelope that is not terminal', function (): void {
+    [$envelope] = createSigningEnvelope([FieldType::Signature]);
+    $originalPath = $envelope->document->storage_path;
+
+    expect(fn () => resolve(PurgeEnvelope::class)->handle($envelope->team, $envelope->sender, (int) $envelope->getKey()))
+        ->toThrow(DomainException::class, 'Only completed, voided, or declined')
+        ->and(Envelope::query()->whereKey($envelope)->exists())->toBeTrue()
+        ->and(Storage::exists($originalPath))->toBeTrue()
+        ->and(AuditEvent::query()->where('envelope_id', $envelope->getKey())->count())->toBe(3);
 });
 
 it('requires the distinct confirmation step and explicit destructive submission before purging', function (): void {
