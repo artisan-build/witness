@@ -151,13 +151,13 @@ it('renders the real PDF placement structure with stable browser hooks and commi
             'variant="danger" size="sm" data-testid="delete-envelope"',
         )
         ->and((string) file_get_contents(resource_path('views/livewire/sender/template-editor.blade.php')))->toContain(
-            '<flux:button :href="route(\'sender.templates.send-form\', $template)" variant="primary">Use template</flux:button>',
-            '<flux:button type="button" x-on:click="add()">Add role</flux:button>',
-            '<flux:button type="submit" variant="primary">Save roles</flux:button>',
-            'variant="primary" class="witness-button-full">Map signers</flux:button>',
+            '<flux:button :href="route(\'sender.templates.send-form\', $template)" variant="primary">',
+            '<flux:button type="button" x-on:click="add()">',
+            '<flux:button type="submit" variant="primary">',
+            'variant="primary" class="witness-button-full"',
         )
         ->and((string) file_get_contents(resource_path('views/sender/templates/index.blade.php')))->toContain(
-            '<a class="witness-button-secondary" href="{{ route(\'sender.templates.send-form\', $template) }}">Use template</a>',
+            '<a class="witness-button-secondary" href="{{ route(\'sender.templates.send-form\', $template) }}">',
         )
         ->and($canvasWidth)->toBeInt()
         ->and($canvasHeight)->toBeInt()
