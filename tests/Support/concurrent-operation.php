@@ -10,6 +10,7 @@ use App\Actions\VoidEnvelope;
 use App\Events\EnvelopeReadyForCompletion;
 use App\Http\Controllers\EnvelopeController;
 use App\Http\Controllers\TemplateController;
+use App\Http\Middleware\EnsureSelectedTeam;
 use App\Models\Signer;
 use App\Models\Team;
 use App\Services\EnvelopeLifecycleService;
@@ -21,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 require dirname(__DIR__, 2).'/vendor/autoload.php';
@@ -29,12 +31,14 @@ $app = require dirname(__DIR__, 2).'/bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 [$script, $operation, $teamId, $userId, $recordId, $payload] = $argv;
-$team = Team::query()->findOrFail((int) $teamId);
+$team = $operation === 'team-autoprovision' ? null : Team::query()->findOrFail((int) $teamId);
 $user = User::query()->findOrFail((int) $userId);
 $data = json_decode($payload, true, flags: JSON_THROW_ON_ERROR);
 
 Auth::login($user);
-resolve(SelectedTeam::class)->set($team);
+if ($team !== null) {
+    resolve(SelectedTeam::class)->set($team);
+}
 
 try {
     if ($operation === 'completion-retry') {
@@ -42,6 +46,16 @@ try {
     }
     match ($operation) {
         'send' => resolve(SendEnvelope::class)->handle($team, $user, (int) $recordId),
+        'team-autoprovision' => (function () use ($user): Response {
+            $request = Request::create('/sender/dashboard', 'GET');
+            $request->setUserResolver(static fn (): User => $user);
+            $request->setLaravelSession(app('session.store'));
+
+            return resolve(EnsureSelectedTeam::class)->handle(
+                $request,
+                static fn (): Response => response('ok'),
+            );
+        })(),
         'sign' => resolve(SignEnvelope::class)->handle(
             Signer::query()->findOrFail((int) $recordId),
             '192.0.2.44',

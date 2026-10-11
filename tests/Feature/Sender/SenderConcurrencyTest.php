@@ -413,3 +413,41 @@ it('serializes scheduled expiry and owner void to one terminal lifecycle result'
         }
     }
 });
+
+it('autoprovisions exactly one personal team across concurrent first visits', function (): void {
+    $setup = senderRaceConnection();
+    $locker = senderRaceConnection();
+    $suffix = bin2hex(random_bytes(6));
+    $userId = null;
+
+    try {
+        $statement = $setup->prepare('INSERT INTO users (name, email, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) RETURNING id');
+        $statement->execute(["Autoprovision {$suffix}", "autoprovision-{$suffix}@example.test"]);
+        $userId = (int) $statement->fetchColumn();
+
+        $locker->beginTransaction();
+        $locker->prepare('SELECT id FROM users WHERE id = ? FOR UPDATE')->execute([$userId]);
+        $first = startSenderOperation('team-autoprovision', 0, $userId, 0);
+        $second = startSenderOperation('team-autoprovision', 0, $userId, 0);
+        Sleep::usleep(350000);
+        expect($first->isRunning())->toBeTrue($first->getOutput().$first->getErrorOutput())
+            ->and($second->isRunning())->toBeTrue($second->getOutput().$second->getErrorOutput());
+        $locker->commit();
+
+        finishSenderOperation($first);
+        finishSenderOperation($second);
+
+        $statement = $setup->prepare('SELECT COUNT(*) FROM teams WHERE id IN (SELECT team_id FROM team_user WHERE user_id = ?)');
+        $statement->execute([$userId]);
+        expect((int) $statement->fetchColumn())->toBe(1);
+    } finally {
+        if ($locker->inTransaction()) {
+            $locker->rollBack();
+        }
+        if ($userId !== null) {
+            $setup->prepare('DELETE FROM team_user WHERE user_id = ?')->execute([$userId]);
+            $setup->prepare('DELETE FROM teams WHERE id IN (SELECT team_id FROM team_user WHERE user_id = ?)')->execute([$userId]);
+            $setup->prepare('DELETE FROM users WHERE id = ?')->execute([$userId]);
+        }
+    }
+});
