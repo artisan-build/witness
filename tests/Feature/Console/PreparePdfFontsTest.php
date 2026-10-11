@@ -8,6 +8,23 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
 use RuntimeException;
 
+beforeEach(function (): void {
+    $files = app(Filesystem::class);
+    $generated = resource_path('fonts/generated');
+    if (is_file($generated.DIRECTORY_SEPARATOR.'pacifico.json')) {
+        $files->copyDirectory($generated, sys_get_temp_dir().'/witness-generated-fonts-backup');
+    }
+});
+
+afterEach(function (): void {
+    $files = app(Filesystem::class);
+    $backup = sys_get_temp_dir().'/witness-generated-fonts-backup';
+    if (is_dir($backup)) {
+        $files->copyDirectory($backup, resource_path('fonts/generated'));
+        $files->deleteDirectory($backup);
+    }
+});
+
 it('generates the pinned licensed fonts and keeps every source pinned to its committed bytes', function (): void {
     $pins = (new ReflectionClass(PreparePdfFonts::class))->getConstant('SOURCES');
     $files = resolve(Filesystem::class);
