@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 use App\Actions\CreateDraftEnvelope;
 use App\Actions\SendEnvelope;
+use App\Domain\Audit\AuditCanonicalizer;
 use App\Domain\Audit\AuditChainVerifier;
 use App\Domain\Audit\AuditHasher;
 use App\Enums\AuditEventType;
 use App\Models\AuditEvent;
 use App\Models\Team;
+use App\Support\CanonicalJson;
 use Database\Factories\UserFactory;
 use Illuminate\Support\Facades\DB;
 use Thunk\Verbs\Models\VerbEvent;
@@ -132,6 +134,135 @@ it('detects predecessor and event hash changes', function (string $column): void
         ->and($result->failingSequence)->toBe(1)
         ->and($result->failingEventId)->toBe($first->getKey());
 })->with(['prev_hash', 'hash']);
+
+it('rejects a fully consistent forged chain that does not begin with created', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $canonicalizer = resolve(AuditCanonicalizer::class);
+    $hasher = resolve(AuditHasher::class);
+    $document = $envelope->document()->firstOrFail();
+    $genesis = $hasher->genesis((int) $envelope->getKey(), $document->original_sha256);
+
+    tamperWithAuditEvents(function () use ($envelope, $canonicalizer, $hasher, $genesis): void {
+        $event = $envelope->auditEvents()->orderBy('sequence')->firstOrFail();
+
+        $canonical = $canonicalizer->encode(
+            envelopeId: (int) $envelope->getKey(),
+            verbEventId: $event->verb_event_id,
+            sequence: 1,
+            type: AuditEventType::Sent,
+            occurredAt: $event->occurred_at,
+            actorType: $event->actor_type,
+            actorId: $event->actor_id,
+            ipAddress: $event->ip_address,
+            userAgent: $event->user_agent,
+            payload: $event->payload,
+        );
+        $head = $hasher->eventHash($genesis, $canonical);
+
+        DB::table('audit_events')->where('id', $event->getKey())->update([
+            'type' => 'sent',
+            'canonical_event' => $canonical,
+            'prev_hash' => $genesis,
+            'hash' => $head,
+        ]);
+        DB::table('audit_events')->where('envelope_id', $envelope->getKey())->where('sequence', '>', 1)->delete();
+
+        DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+        DB::table('envelopes')->where('id', $envelope->getKey())->update([
+            'audit_event_count' => 1,
+            'audit_chain_head' => $head,
+        ]);
+    });
+
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
+
+    expect($result->valid)->toBeFalse()
+        ->and($result->failingSequence)->toBe(1)
+        ->and($result->reason)->toContain('must begin with created');
+});
+
+it('rejects a chain whose stored envelope anchor head diverges from the recomputed tail', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    DB::statement("SELECT set_config('witness.audit_append', 'on', true)");
+    DB::table('envelopes')->where('id', $envelope->getKey())->update([
+        'audit_chain_head' => str_repeat('0', 64),
+    ]);
+
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
+
+    expect($result->valid)->toBeFalse()
+        ->and($result->reason)->toContain('audit head');
+});
+
+it('detects a consistently forged extra audit row against the envelope anchor', function (): void {
+    [$team, $sender, $envelope] = createAuditedEnvelope();
+    resolve(SendEnvelope::class)->handle($team, $sender, $envelope->getKey());
+
+    $canonicalizer = resolve(AuditCanonicalizer::class);
+    $hasher = resolve(AuditHasher::class);
+
+    tamperWithAuditEvents(function () use ($envelope, $canonicalizer, $hasher): void {
+        $last = AuditEvent::query()
+            ->where('envelope_id', $envelope->getKey())
+            ->orderByDesc('sequence')
+            ->firstOrFail();
+        $when = $last->occurred_at->addSeconds(5);
+
+        $canonical = $canonicalizer->encode(
+            envelopeId: (int) $envelope->getKey(),
+            verbEventId: 987654321,
+            sequence: $last->sequence + 1,
+            type: AuditEventType::Opened,
+            occurredAt: $when,
+            actorType: $last->actor_type,
+            actorId: $last->actor_id,
+            ipAddress: $last->ip_address,
+            userAgent: $last->user_agent,
+            payload: $last->payload,
+        );
+
+        DB::table('audit_events')->insert([
+            'envelope_id' => $envelope->getKey(),
+            'verb_event_id' => 987654321,
+            'sequence' => $last->sequence + 1,
+            'type' => 'opened',
+            'occurred_at' => $when->format('Y-m-d H:i:s.u'),
+            'actor_type' => $last->actor_type->value,
+            'actor_id' => $last->actor_id,
+            'ip_address' => $last->ip_address,
+            'user_agent' => $last->user_agent,
+            'payload' => resolve(CanonicalJson::class)->encode($last->payload),
+            'canonical_event' => $canonical,
+            'prev_hash' => $last->hash,
+            'hash' => $hasher->eventHash($last->hash, $canonical),
+            'created_at' => $last->created_at,
+        ]);
+    });
+
+    $forged = AuditEvent::query()->where('verb_event_id', 987654321)->firstOrFail();
+    $recomputed = $canonicalizer->encode(
+        envelopeId: (int) $envelope->getKey(),
+        verbEventId: $forged->verb_event_id,
+        sequence: $forged->sequence,
+        type: $forged->type,
+        occurredAt: $forged->occurred_at,
+        actorType: $forged->actor_type,
+        actorId: $forged->actor_id,
+        ipAddress: $forged->ip_address,
+        userAgent: $forged->user_agent,
+        payload: $forged->payload,
+    );
+    expect($recomputed)->toBe($forged->canonical_event);
+
+    $result = resolve(AuditChainVerifier::class)->verify($envelope);
+
+    expect($result->valid)->toBeFalse()
+        ->and($result->reason)->toContain('Expected 3 audit events, found 4');
+});
 
 it('derives genesis from both envelope identity and original document hash', function (): void {
     $hasher = resolve(AuditHasher::class);
