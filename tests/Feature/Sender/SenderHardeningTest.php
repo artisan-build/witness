@@ -185,12 +185,18 @@ it('durably records failed deletion and retries on the recorded disk', function 
 });
 
 it('runs scheduled private file cleanup inside system authority', function (): void {
+    Storage::fake('local');
+    Storage::disk('local')->put('documents/scheduled-stale.pdf', 'scheduled stale');
+    PendingFileDeletion::query()->create(['disk' => 'local', 'path' => 'documents/scheduled-stale.pdf']);
+
     $event = collect(resolve(Schedule::class)->events())->first(
         fn (mixed $event): bool => $event instanceof CallbackEvent
             && $event->description === 'witness:cleanup-private-files',
     );
     expect($event)->toBeInstanceOf(CallbackEvent::class);
     assert($event instanceof CallbackEvent);
+    expect($event->expression)->toBe('* * * * *')
+        ->and($event->withoutOverlapping)->toBeTrue();
 
     $authorityStates = [];
     DB::listen(function (QueryExecuted $query) use (&$authorityStates): void {
@@ -203,7 +209,9 @@ it('runs scheduled private file cleanup inside system authority', function (): v
 
     expect($authorityStates)->not->toBeEmpty()
         ->and(array_unique($authorityStates))->toBe([true])
-        ->and(resolve(SystemAuthorityContext::class)->active())->toBeFalse();
+        ->and(resolve(SystemAuthorityContext::class)->active())->toBeFalse()
+        ->and(Storage::disk('local')->exists('documents/scheduled-stale.pdf'))->toBeFalse()
+        ->and(PendingFileDeletion::query()->count())->toBe(0);
 });
 
 it('cleans each exact displaced template object across repeated replacements', function (): void {
