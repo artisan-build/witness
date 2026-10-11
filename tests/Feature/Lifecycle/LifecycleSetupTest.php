@@ -522,7 +522,8 @@ it('filters the owner dashboard and renders structural audit evidence without se
         ->assertSee($sent->title)
         ->assertDontSee($draft->title)
         ->assertSee('data-testid="status-filter"', false)
-        ->assertSee($signer->name.': '.$signer->status->value);
+        ->assertSee($signer->name.': '.$signer->status->value)
+        ->assertDontSee($signer->email);
 
     $this->get(route('sender.envelopes.edit', $sent))
         ->assertOk()
