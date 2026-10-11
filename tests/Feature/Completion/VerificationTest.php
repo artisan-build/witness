@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\MailDeliveryPurpose;
+use App\Enums\MailDeliveryStatus;
 use App\Models\Team;
 use ArtisanBuild\BuiltForCloud\Http\Middleware\EnsureUserIsAuthenticated;
 use Database\Factories\UserFactory;
@@ -127,4 +128,18 @@ it('scopes sender final downloads and serves signed recipient links privately', 
     $signedUrl = URL::signedRoute('final.recipient.download', ['delivery' => $delivery->getKey()]);
     $this->get($signedUrl)->assertOk()->assertHeader('Content-Type', 'application/pdf');
     $this->get(route('final.recipient.download', $delivery))->assertForbidden();
+
+    $delivery->update(['status' => MailDeliveryStatus::Pending->value]);
+    $this->get($signedUrl)->assertNotFound();
+    $delivery->update(['status' => MailDeliveryStatus::Sent->value, 'purpose' => MailDeliveryPurpose::SigningCode->value]);
+    $this->get($signedUrl)->assertNotFound();
+    $delivery->update(['status' => MailDeliveryStatus::Sent->value, 'purpose' => MailDeliveryPurpose::FinalDocument->value]);
+    $this->get($signedUrl)->assertOk();
+
+    Storage::put($envelope->document->fresh()->final_storage_path, 'tampered bytes after completion');
+    $this->actingAsVersioned($owner)
+        ->withSession(['witness.team_id' => $team->getKey()])
+        ->get($route)
+        ->assertNotFound();
+    $this->get($signedUrl)->assertNotFound();
 });
