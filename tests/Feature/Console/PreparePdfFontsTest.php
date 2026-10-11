@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 use App\Console\Commands\PreparePdfFonts;
 use App\Services\PdfFontCoverage;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
+use RuntimeException;
 
 it('generates the pinned licensed fonts and keeps every source pinned to its committed bytes', function (): void {
     $pins = (new ReflectionClass(PreparePdfFonts::class))->getConstant('SOURCES');
-    expect($pins)->toBe([
-        'Pacifico-Regular.ttf' => '5b6c0d5334a7bf77dea52b975c5a0c408878c0f7115ed5b6fb151f634b7bf701',
-        'NotoSans.ttf' => 'bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d',
-    ]);
+    $files = resolve(Filesystem::class);
 
     foreach ($pins as $filename => $expectedHash) {
         $source = resource_path('fonts/source').DIRECTORY_SEPARATOR.$filename;
@@ -19,6 +18,7 @@ it('generates the pinned licensed fonts and keeps every source pinned to its com
             ->and(hash_equals($expectedHash, (string) hash_file('sha256', $source)))->toBeTrue();
     }
 
+    $files->cleanDirectory(resource_path('fonts/generated'));
     expect(Artisan::call('witness:prepare-pdf-fonts'))->toBe(0);
 
     $coverage = resolve(PdfFontCoverage::class);

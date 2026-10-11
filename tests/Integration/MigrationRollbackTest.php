@@ -10,6 +10,10 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
+afterEach(function (): void {
+    Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);
+});
+
 it('restores working guards after rolling back the lifecycle migration', function (): void {
     expect(Artisan::call('migrate:fresh', [
         '--database' => 'pgsql',
