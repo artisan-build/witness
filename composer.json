@@ -15,7 +15,7 @@
     "require": {
         "php": "^8.4",
         "ext-gd": "*",
-        "artisan-build/built-for-cloud": "^0.19.9",
+        "artisan-build/built-for-cloud": "^0.19.10",
         "artisan-build/hone-client": "^1.6",
         "hirethunk/verbs": "^0.9.0",
         "laravel/chisel": "^0.1.0",
