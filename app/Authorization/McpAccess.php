@@ -4,24 +4,42 @@ declare(strict_types=1);
 
 namespace App\Authorization;
 
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipalResolver;
+use ArtisanBuild\BuiltForCloud\Console\DelegatedActor;
 use ArtisanBuild\BuiltForCloud\Credential;
 use ArtisanBuild\BuiltForCloud\CredentialPurpose;
 use ArtisanBuild\BuiltForCloud\CredentialStatus;
+use ArtisanBuild\BuiltForCloud\Exceptions\DelegatedPrincipalUnsupported;
+use ArtisanBuild\BuiltForCloud\Exceptions\ManagedAuthRefused;
+use ArtisanBuild\BuiltForCloud\Exceptions\NoActingPrincipal;
+use ArtisanBuild\BuiltForCloud\ManagedAccountAccess;
+use ArtisanBuild\BuiltForCloud\ManagedAuthConnection;
+use ArtisanBuild\BuiltForCloud\OffboardedSubject;
 use ArtisanBuild\BuiltForCloud\RolePolicy;
 use ArtisanBuild\BuiltForCloud\User;
 use Illuminate\Http\Request;
 
-final class McpAccess
+final readonly class McpAccess
 {
+    public function __construct(
+        private Request $request,
+        private ActingPrincipalResolver $principals,
+        private ManagedAccountAccess $managedAccess,
+    ) {}
+
     public function user(WitnessMcpAbility $ability): ?User
     {
-        $request = resolve('request');
-
-        if (! $request instanceof Request) {
+        try {
+            $acting = $this->principals->require($this->request);
+        } catch (DelegatedPrincipalUnsupported|NoActingPrincipal) {
             return null;
         }
 
-        $credential = $request->user();
+        if ($acting->delegatedActor instanceof DelegatedActor) {
+            return $this->delegatedUser($acting->delegatedActor);
+        }
+
+        $credential = $acting->principal;
 
         if (! $credential instanceof Credential
             || $credential->purpose !== CredentialPurpose::Mcp
@@ -34,12 +52,38 @@ final class McpAccess
             return null;
         }
 
+        $user = $this->principals->localUser($this->request);
+
+        return $user instanceof User && $this->allows($user) ? $user : null;
+    }
+
+    private function delegatedUser(DelegatedActor $actor): ?User
+    {
+        try {
+            $connection = ManagedAuthConnection::current();
+        } catch (ManagedAuthRefused) {
+            return null;
+        }
+
+        if (! hash_equals($connection->issuer, $actor->issuer)) {
+            return null;
+        }
+
         $user = User::query()
-            ->whereKey((int) $credential->user_id)
-            ->where('status', 'active')
-            ->whereNull('deactivated_at')
+            ->where('scalpels_issuer', $connection->issuer)
+            ->where('scalpels_connection_id', $connection->connectionId)
+            ->where('scalpels_id', $actor->subject)
             ->first();
 
-        return $user instanceof User && RolePolicy::canUseProduct($user->role) ? $user : null;
+        return $user instanceof User && $this->allows($user) ? $user : null;
+    }
+
+    private function allows(User $user): bool
+    {
+        return $user->status === 'active'
+            && $user->deactivated_at === null
+            && RolePolicy::canUseProduct($user->role)
+            && ! OffboardedSubject::userOrSubjectIsOffboarded($this->request, $user)
+            && $this->managedAccess->allows($user);
     }
 }
