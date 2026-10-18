@@ -367,11 +367,8 @@ it('does not treat delegated principal bfc-console:7 as local user 7', function 
     $issuer = 'https://witness-console.test';
     ManagedMcpContext::configure($issuer);
 
-    while (! User::query()->whereKey(7)->exists()) {
-        UserFactory::new()->create();
-    }
-
-    $collidingUser = User::query()->findOrFail(7);
+    $collidingUser = UserFactory::new()->make();
+    $collidingUser->forceFill(['id' => 7])->save();
     $team = Team::factory()->create();
     $team->users()->attach($collidingUser);
     $envelope = Envelope::factory()->forOwner($team, $collidingUser)->create([
