@@ -21,6 +21,7 @@ use App\Models\Team;
 use App\Models\Template;
 use App\Support\McpDeploymentContext;
 use ArtisanBuild\BuiltForCloud\Console\ConsoleKeyring;
+use ArtisanBuild\BuiltForCloud\Console\DelegatedActor;
 use ArtisanBuild\BuiltForCloud\Credential;
 use ArtisanBuild\BuiltForCloud\CredentialAbilityRegistry;
 use ArtisanBuild\BuiltForCloud\CredentialKind;
@@ -29,6 +30,7 @@ use ArtisanBuild\BuiltForCloud\CredentialStatus;
 use ArtisanBuild\BuiltForCloud\Mcp\RequestEffectCeiling;
 use ArtisanBuild\BuiltForCloud\Mcp\TwoPhase;
 use ArtisanBuild\BuiltForCloud\Mcp\TwoPhaseCallTool;
+use ArtisanBuild\BuiltForCloud\OffboardedSubject;
 use ArtisanBuild\BuiltForCloud\SubjectType;
 use ArtisanBuild\BuiltForCloud\Testing\McpDelegatedTools;
 use ArtisanBuild\BuiltForCloud\User;
@@ -54,6 +56,7 @@ use ParagonIE\Paseto\Builder;
 use ParagonIE\Paseto\Keys\Version4\AsymmetricSecretKey;
 use ParagonIE\Paseto\Protocol\Version4;
 use ParagonIE\Paseto\Purpose;
+use Tests\Support\ManagedMcpContext;
 use Tests\Support\PdfFixture;
 
 function bindWitnessMcpCredential(?User $user, array $abilities): Credential
@@ -359,6 +362,71 @@ it('fails closed at every concrete route entry point for inexact abilities and u
 
     expect($queries)->toBeEmpty();
 });
+
+it('does not treat delegated principal bfc-console:7 as local user 7', function (): void {
+    $issuer = 'https://witness-console.test';
+    ManagedMcpContext::configure($issuer);
+
+    while (! User::query()->whereKey(7)->exists()) {
+        UserFactory::new()->create();
+    }
+
+    $collidingUser = User::query()->findOrFail(7);
+    $team = Team::factory()->create();
+    $team->users()->attach($collidingUser);
+    $envelope = Envelope::factory()->forOwner($team, $collidingUser)->create([
+        'title' => 'Numeric collision must stay private',
+    ]);
+
+    $actor = new DelegatedActor;
+    $actor->forceFill([
+        'id' => 7,
+        'identity_hash' => DelegatedActor::identityHash($issuer, 'operator-test'),
+        'issuer' => $issuer,
+        'subject' => 'operator-test',
+        'last_handoff_display_name' => 'Witness Operator',
+        'last_handoff_on_behalf_of' => null,
+        'last_handoff_role' => 'admin',
+    ])->save();
+
+    $response = callWitnessMcpTool('/mcp', witnessDelegatedAssertion(), 'list_envelopes', [])->assertOk();
+
+    expect($response->json('result.isError'))->toBeTrue()
+        ->and($response->getContent())->not->toContain($envelope->title)
+        ->and($actor->getAuthIdentifier())->toBe('bfc-console:7');
+});
+
+it('refuses a mapped delegated user that fails a local access gate', function (Closure $deny): void {
+    $issuer = 'https://witness-console.test';
+    ManagedMcpContext::configure($issuer);
+    $user = ManagedMcpContext::user($issuer, 'operator-test');
+    $team = Team::factory()->create();
+    $team->users()->attach($user);
+    $envelope = Envelope::factory()->forOwner($team, $user)->create([
+        'title' => 'Blocked delegated user envelope',
+    ]);
+    $deny($user);
+
+    $response = callWitnessMcpTool('/mcp', witnessDelegatedAssertion(), 'list_envelopes', [])->assertOk();
+
+    expect($response->json('result.isError'))->toBeTrue()
+        ->and($response->getContent())->not->toContain($envelope->title);
+})->with([
+    'inactive user' => static function (User $user): void {
+        $user->forceFill(['status' => 'inactive'])->save();
+    },
+    'offboarded user' => static function (User $user): void {
+        OffboardedSubject::query()->create([
+            'subject_type' => SubjectType::UserPrincipal,
+            'subject_ref' => 'witness-user:'.$user->getKey(),
+            'user_id' => (string) $user->getKey(),
+            'offboarded_at' => now(),
+        ]);
+    },
+    'disabled managed membership' => static function (User $user): void {
+        $user->forceFill(['managed_membership_status' => 'disabled'])->save();
+    },
+]);
 
 it('refuses a product-role-revoked bound principal before dispatching any tool', function (): void {
     $user = UserFactory::new()->create();

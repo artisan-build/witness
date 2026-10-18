@@ -3,6 +3,15 @@
 declare(strict_types=1);
 
 use App\Listeners\CompleteReadyEnvelope;
+use App\Mcp\Tools\EnvelopeStatus;
+use App\Mcp\Tools\ListEnvelopes;
+use App\Mcp\Tools\ListTemplates;
+use App\Mcp\Tools\Remind;
+use App\Mcp\Tools\SendFromTemplate;
+use App\Mcp\Tools\VoidEnvelope;
+use App\Mcp\WitnessMcpServer;
+use App\Models\Envelope;
+use App\Models\Team;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleReKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\ConsoleRetireKeyCommand;
 use ArtisanBuild\BuiltForCloud\Commands\CreateAdminCommand;
@@ -22,12 +31,16 @@ use ArtisanBuild\BuiltForCloud\Commands\SigningRootEnsureCommand;
 use ArtisanBuild\BuiltForCloud\Commands\SigningRootProvisionCommand;
 use ArtisanBuild\BuiltForCloud\Commands\SubjectOffboardCommand;
 use ArtisanBuild\BuiltForCloud\Commands\WarnExpiringCredentialsCommand;
+use ArtisanBuild\BuiltForCloud\Console\ActingPrincipal;
 use ArtisanBuild\BuiltForCloud\CredentialPurpose;
 use ArtisanBuild\BuiltForCloud\Jobs\DeliverOwnershipWebhook;
 use ArtisanBuild\BuiltForCloud\Testing\ConsumerConformance;
 use ArtisanBuild\BuiltForCloud\Testing\ContractAssertions;
 use ArtisanBuild\BuiltForCloud\Testing\FleetConformance;
+use ArtisanBuild\BuiltForCloud\Testing\McpDelegatedEnforcement;
 use Composer\InstalledVersions;
+use Laravel\Mcp\ResponseFactory;
+use Tests\Support\ManagedMcpContext;
 
 uses(ContractAssertions::class);
 
@@ -53,6 +66,14 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
 
         return $members;
     };
+    $mcpTools = $sorted([
+        EnvelopeStatus::class,
+        ListEnvelopes::class,
+        ListTemplates::class,
+        Remind::class,
+        SendFromTemplate::class,
+        VoidEnvelope::class,
+    ]);
 
     $expected = [
         'runtime.meta' => [],
@@ -119,8 +140,53 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
             'ArtisanBuild\BuiltForCloud\Mcp\TwoPhaseConfirmationStore|built-for-cloud.manifest.slug|1',
             'ArtisanBuild\BuiltForCloud\UiCredentialPurposes|built-for-cloud.ui.credential_purposes|1',
         ]),
-        'mcp_delegated' => [],
+        'mcp_delegated' => $mcpTools,
     ];
+
+    $issuer = 'https://bfc-enforcement.test';
+    ManagedMcpContext::configure($issuer);
+    $primaryUser = ManagedMcpContext::user($issuer, 'bfc-enforcement-primary');
+    ManagedMcpContext::user($issuer, 'bfc-enforcement-secondary');
+    $primaryTeam = Team::factory()->create();
+    $primaryTeam->users()->attach($primaryUser);
+    config(['built-for-cloud.mcp.delegated' => true]);
+
+    McpDelegatedEnforcement::assertHonors(
+        WitnessMcpServer::class,
+        $mcpTools,
+        negativeAuthorization: static function (
+            ActingPrincipal $first,
+            ActingPrincipal $second,
+            Closure $invoke,
+        ) use ($primaryTeam, $primaryUser): void {
+            expect($first->identifier())->not->toBe($second->identifier());
+
+            $envelope = Envelope::factory()->forOwner($primaryTeam, $primaryUser)->create([
+                'title' => 'Primary delegated subject only',
+            ]);
+            $response = $invoke(ListEnvelopes::class);
+
+            expect($response)->toBeInstanceOf(ResponseFactory::class)
+                ->and($response->getStructuredContent()['envelopes'])->toBe([])
+                ->and(collect($response->getStructuredContent()['envelopes'])->pluck('id')->all())
+                ->not->toContain($envelope->getKey());
+        },
+        arguments: [
+            SendFromTemplate::class => [
+                'template_id' => PHP_INT_MAX,
+                'roles' => [[
+                    'role' => 'Signer',
+                    'name' => 'Delegated enforcement probe',
+                    'email' => 'delegated-probe@example.test',
+                ]],
+            ],
+            VoidEnvelope::class => [
+                'envelope_id' => PHP_INT_MAX,
+                'reason' => 'Delegated enforcement probe.',
+            ],
+        ],
+    );
+    ManagedMcpContext::restoreStandaloneAuthority();
 
     $report = (new FleetConformance($this))->assert(new ConsumerConformance(
         consumer: 'witness',
@@ -129,9 +195,9 @@ it('passes the version 1 reference-consumer conformance spec', function (): void
         sourceRoots: $sourceRoots,
         providerFiles: $providerFiles,
         runtimeAssertions: ['auth_schema', 'credential_listing', 'meta', 'transport_parity'],
-        capabilities: ['credentials', 'tokens'],
+        capabilities: ['credentials', 'mcp-delegated', 'tokens'],
         purposeMappings: $purposeMappings,
-        mcpServer: null,
+        mcpServer: WitnessMcpServer::class,
         expected: $expected,
     ));
 
