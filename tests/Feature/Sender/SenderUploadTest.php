@@ -20,7 +20,7 @@ it('creates a personal team and stores inspected PDF bytes privately', function 
     ]);
 
     $envelope = Envelope::query()->with('document')->sole();
-    $response->assertRedirect(route('sender.envelopes.edit', $envelope));
+    $response->assertRedirect(route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => 'signers']));
     expect(Team::query()->count())->toBe(1)
         ->and($envelope->sender_id)->toBe($user->getKey())
         ->and($envelope->document->page_count)->toBe(2)

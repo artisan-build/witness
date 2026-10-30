@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\EnvelopeStatus;
+use App\Enums\SignerStatus;
 use ArtisanBuild\BuiltForCloud\User;
 use Database\Factories\EnvelopeFactory;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 /**
  * @mixin IdeHelperEnvelope
@@ -70,6 +72,18 @@ class Envelope extends Model
     public function document(): HasOne
     {
         return $this->hasOne(Document::class);
+    }
+
+    /** A sender's one-line read of where the envelope stands, such as "1 of 2 signed". */
+    public function progressSummary(): string
+    {
+        $total = $this->signers->count();
+
+        if ($this->status === EnvelopeStatus::Draft) {
+            return $total === 0 ? 'No signers yet' : $total.' '.Str::plural('signer', $total);
+        }
+
+        return $this->signers->where('status', SignerStatus::Signed)->count().' of '.$total.' signed';
     }
 
     /** @return HasMany<Signer, $this> */

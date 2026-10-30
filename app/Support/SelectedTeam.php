@@ -16,6 +16,11 @@ final class SelectedTeam
         $this->team = $team;
     }
 
+    public function current(): ?Team
+    {
+        return $this->team;
+    }
+
     public function get(): Team
     {
         return $this->team ?? throw new LogicException('No sender team has been selected.');
