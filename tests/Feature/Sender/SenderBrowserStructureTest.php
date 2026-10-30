@@ -38,8 +38,9 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     $template->roles()->create(['label' => '<script>unsafe-role</script>', 'position' => 1]);
 
     $envelopeResponse = $this->actingAsVersioned($user)->withSession(['witness.team_id' => $team->getKey()])
-        ->get(route('sender.envelopes.edit', $envelope))
+        ->get(route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => 'fields']))
         ->assertOk()
+        ->assertSee('data-testid="envelope-steps"', false)
         ->assertSee('data-testid="field-placement"', false)
         ->assertSee('data-testid="pdf-page-canvas"', false)
         ->assertSee('data-page-next', false)
@@ -55,8 +56,12 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     $document = new DOMDocument;
     @$document->loadHTML((string) $envelopeResponse->getContent());
     $xpath = new DOMXPath($document);
-    foreach (['Replace', 'Add signer', 'Save signers', 'Save as template'] as $label) {
-        expect($xpath->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button ") and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
+    foreach (['details' => ['Replace', 'Save details'], 'signers' => ['Add signer', 'Save signers'], 'review' => ['Save as template']] as $step => $labels) {
+        $stepDocument = new DOMDocument;
+        @$stepDocument->loadHTML((string) $this->get(route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => $step]))->assertOk()->getContent());
+        foreach ($labels as $label) {
+            expect((new DOMXPath($stepDocument))->query('//button[contains(concat(" ", normalize-space(@class), " "), " witness-button-secondary ") and normalize-space(.)="'.$label.'"]')->length)->toBe(1);
+        }
     }
 
     $islands = $xpath->query('//script[@type="application/json" and @data-placement-data]');
@@ -67,10 +72,15 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->toContain('0.092857')
         ->toContain('\u003Cscript\u003Eunsafe');
 
-    $envelopeResponse->assertSee('<button class="witness-button" type="submit">Save details</button>', false)
-        ->assertSee('<button class="witness-button" type="submit" data-testid="save-fields">Save placements</button>', false)
-        ->assertSee('<button class="witness-button witness-button-full" type="submit" data-testid="send-envelope">Send and freeze</button>', false)
+    $envelopeResponse->assertSee('<button class="witness-button-secondary" type="submit" data-testid="save-fields">Save placements</button>', false)
+        ->assertSee('<button class="witness-button" type="submit" name="next" value="review" data-testid="fields-continue">Save and review</button>', false);
+    $this->get(route('sender.envelopes.edit', $envelope))
+        ->assertOk()
+        ->assertSee('<button class="witness-button-secondary" type="submit">Save details</button>', false)
         ->assertSee('<input class="witness-file-input" type="file"', false);
+    $this->get(route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => 'review']))
+        ->assertOk()
+        ->assertSee('<button class="witness-button witness-button-full" type="submit" data-testid="send-envelope">Send for signature</button>', false);
 
     $templateResponse = $this->get(route('sender.templates.edit', $template))
         ->assertOk()
@@ -110,7 +120,7 @@ it('renders the real PDF placement structure with stable browser hooks and commi
     $dashboardView = (string) file_get_contents(resource_path('views/sender/dashboard.blade.php'));
     $setupView = (string) file_get_contents(resource_path('views/sender/setup.blade.php'));
     $deleteView = (string) file_get_contents(resource_path('views/sender/envelopes/delete.blade.php'));
-    $envelopeView = (string) file_get_contents(resource_path('views/livewire/sender/envelope-editor.blade.php'));
+    $envelopeView = (string) file_get_contents(resource_path('views/livewire/sender/envelope-status.blade.php'));
     $canvasWidth = strpos($senderScript, 'this.$refs.canvas.width = viewport.width;');
     $canvasHeight = strpos($senderScript, 'this.$refs.canvas.height = viewport.height;');
     $render = strpos($senderScript, 'const renderTask = page.render({ canvasContext: context, viewport });');
@@ -136,14 +146,14 @@ it('renders the real PDF placement structure with stable browser hooks and commi
         ->and($senderStyles)->toContain('.witness-status-declined')
         ->and($senderStyles)->toContain('.witness-status-voided')
         ->and($senderStyles)->toContain('.witness-status-expired')
-        ->and($dashboardView)->toContain('<select class="witness-select witness-status-select"', '<button class="witness-button" type="submit">Filter</button>')
-        ->and($setupView)->toContain('<button class="witness-button" type="submit">Send me a test email</button>')
+        ->and($dashboardView)->toContain('data-testid="envelope-row"', 'data-testid="envelope-list-empty"')
+        ->and($setupView)->toContain('<button class="witness-button-secondary" type="submit">Send me a test email</button>')
         ->and($deleteView)->toContain('<flux:button type="submit" variant="danger">Permanently delete</flux:button>')
         ->and($envelopeView)->toContain(
-            '<button class="witness-button witness-button-small" type="submit">Resend link</button>',
+            '<button class="witness-button-secondary witness-button-small" type="submit">Resend link</button>',
             '<button class="witness-button" type="submit">Retry completion</button>',
-            '<button class="witness-button" type="submit">Create a new delivery generation</button>',
-            '<button class="witness-button" type="submit">Issue fresh final-document link</button>',
+            '<button class="witness-button-secondary" type="submit">Send the final PDF again</button>',
+            '<button class="witness-button-secondary" type="submit">Send a fresh link</button>',
         )
         ->and($envelopeView)->toContain(
             '<flux:button type="submit" variant="danger">Void envelope</flux:button>',

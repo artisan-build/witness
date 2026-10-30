@@ -68,6 +68,7 @@ it('re-scopes the livewire editors to the selected member team and owning sender
     $this->actingAsVersioned($owner);
 
     expect(Livewire::test(EnvelopeEditor::class, ['envelopeId' => $envelope->getKey()])
+        ->set('step', 'fields')
         ->assertSee('data-placement-data', false))
         ->toBeObject()
         ->and(Livewire::test(TemplateEditor::class, ['templateId' => $template->getKey()])
@@ -75,7 +76,7 @@ it('re-scopes the livewire editors to the selected member team and owning sender
         ->toBeObject();
 
     $this->actingAsVersioned($peer);
-    expect(Livewire::test(EnvelopeEditor::class, ['envelopeId' => $envelope->getKey()])->html())
+    expect(Livewire::withQueryParams(['step' => 'fields'])->test(EnvelopeEditor::class, ['envelopeId' => $envelope->getKey()])->html())
         ->not->toContain('data-placement-data')
         ->not->toContain('Editor signer')
         ->and(Livewire::test(TemplateEditor::class, ['templateId' => $template->getKey()])->html())
@@ -84,7 +85,7 @@ it('re-scopes the livewire editors to the selected member team and owning sender
 
     selectEditorTeam($teamB);
     $this->actingAsVersioned($owner);
-    expect(Livewire::test(EnvelopeEditor::class, ['envelopeId' => $envelope->getKey()])->html())
+    expect(Livewire::withQueryParams(['step' => 'fields'])->test(EnvelopeEditor::class, ['envelopeId' => $envelope->getKey()])->html())
         ->not->toContain('data-placement-data')
         ->not->toContain('Editor signer')
         ->and(Livewire::test(TemplateEditor::class, ['templateId' => $template->getKey()])->html())

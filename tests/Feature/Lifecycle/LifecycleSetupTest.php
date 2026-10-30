@@ -10,6 +10,7 @@ use App\Actions\VoidEnvelope;
 use App\Domain\Audit\AuditChainVerifier;
 use App\Enums\AuditActorType;
 use App\Enums\AuditEventType;
+use App\Enums\EnvelopeFilters;
 use App\Enums\EnvelopeStatus;
 use App\Enums\FieldType;
 use App\Enums\MailDeliveryPurpose;
@@ -641,13 +642,18 @@ it('filters the owner dashboard and renders structural audit evidence without se
     $draft = Envelope::factory()->forOwner($sent->team, $sent->sender)->create(['title' => 'Private draft title']);
 
     $this->actingAsVersioned($sent->sender)->withSession(['witness.team_id' => $sent->team_id])
-        ->get(route('sender.dashboard', ['status' => EnvelopeStatus::Sent->value]))
+        ->get(route('sender.dashboard', ['status' => EnvelopeFilters::Waiting->value]))
         ->assertOk()
         ->assertSee($sent->title)
         ->assertDontSee($draft->title)
-        ->assertSee('data-testid="status-filter"', false)
-        ->assertSee($signer->name.': '.$signer->status->value)
+        ->assertSee('data-testid="envelope-filter-waiting"', false)
+        ->assertSee('0 of 1 signed · '.$signer->name)
         ->assertDontSee($signer->email);
+
+    $this->get(route('sender.dashboard', ['status' => EnvelopeStatus::Sent->value]))
+        ->assertOk()
+        ->assertSee($sent->title)
+        ->assertDontSee($draft->title);
 
     $this->get(route('sender.envelopes.edit', $sent))
         ->assertOk()

@@ -6,7 +6,6 @@ use App\Console\Commands\PreparePdfFonts;
 use App\Services\PdfFontCoverage;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
-use RuntimeException;
 
 beforeEach(function (): void {
     $files = resolve(Filesystem::class);

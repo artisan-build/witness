@@ -10,7 +10,9 @@ use App\Actions\RetryEnvelopeCompletion;
 use App\Actions\RotateSigningInvitation;
 use App\Actions\SendEnvelope;
 use App\Actions\VoidEnvelope;
+use App\Enums\EnvelopeFilters;
 use App\Enums\EnvelopeStatus;
+use App\Enums\EnvelopeSteps;
 use App\Enums\FieldType;
 use App\Models\Envelope;
 use App\Models\Template;
@@ -48,13 +50,19 @@ final readonly class EnvelopeController
     {
         $user = $this->user($request);
         $status = $request->string('status')->toString();
+        $filter = EnvelopeFilters::tryFrom($status);
+        $statuses = $filter?->statuses() ?? array_filter([EnvelopeStatus::tryFrom($status)]);
         $envelopes = $this->baseQuery($user)
-            ->when($status !== '', fn (Builder $query) => $query->where('status', $status))
+            ->when($statuses !== [], fn (Builder $query) => $query->whereIn('status', $statuses))
             ->with(['signers' => fn ($query) => $query->orderBy('position')])
-            ->latest()
+            ->latest('updated_at')
             ->get();
 
-        return view('sender.dashboard', compact('envelopes', 'status'));
+        return view('sender.dashboard', [
+            'envelopes' => $envelopes,
+            'filter' => $filter,
+            'isFiltered' => $statuses !== [],
+        ]);
     }
 
     public function create(): View
@@ -90,7 +98,7 @@ final readonly class EnvelopeController
             throw $exception;
         }
 
-        return to_route('sender.envelopes.edit', $envelope)->with('status', 'Draft created. Add signers and fields.');
+        return to_route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => EnvelopeSteps::Signers->value])->with('status', 'Draft created. Now add the people who need to sign.');
     }
 
     public function edit(Request $request, int $envelope): View
@@ -113,7 +121,7 @@ final readonly class EnvelopeController
             $this->lockDraft($envelope)->update($data);
         });
 
-        return back()->with('status', 'Envelope details saved.');
+        return $this->saved($request, $envelope, 'Envelope details saved.');
     }
 
     public function replaceDocument(Request $request, int $envelope): RedirectResponse
@@ -198,7 +206,7 @@ final readonly class EnvelopeController
             }
         });
 
-        return back()->with('status', 'Signers saved in the displayed order.');
+        return $this->saved($request, $envelope, 'Signers saved in the displayed order.');
     }
 
     public function updateFields(Request $request, int $envelope): RedirectResponse
@@ -229,7 +237,7 @@ final readonly class EnvelopeController
             }
         });
 
-        return back()->with('status', 'Field placements saved.');
+        return $this->saved($request, $envelope, 'Field placements saved.');
     }
 
     public function send(Request $request, int $envelope): RedirectResponse
@@ -422,6 +430,17 @@ final readonly class EnvelopeController
         }
 
         return to_route('sender.templates.edit', $template)->with('status', 'Template created from the draft.');
+    }
+
+    /** @return Builder<Envelope> */
+    /** Back to the step just saved, or on to the step the sender chose to continue to. */
+    private function saved(Request $request, int $envelope, string $message): RedirectResponse
+    {
+        $next = $request->string('next')->toString();
+
+        return in_array($next, EnvelopeSteps::values(), true)
+            ? to_route('sender.envelopes.edit', ['envelope' => $envelope, 'step' => $next])->with('status', $message)
+            : back()->with('status', $message);
     }
 
     /** @return Builder<Envelope> */
