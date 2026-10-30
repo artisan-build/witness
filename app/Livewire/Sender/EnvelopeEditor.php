@@ -56,7 +56,7 @@ final class EnvelopeEditor extends Component
 
         return view('livewire.sender.envelope-draft', [
             'envelope' => $envelope,
-            'step' => $step,
+            'currentStep' => $step,
             'steps' => $this->stepBar($envelope, $step),
             'fieldTypes' => FieldType::cases(),
             'placementData' => [

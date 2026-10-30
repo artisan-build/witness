@@ -25,8 +25,7 @@
         @endforeach
     </nav>
 
-    @switch ($step)
-        @case (\App\Enums\EnvelopeSteps::Details)
+    @if ($currentStep === \App\Enums\EnvelopeSteps::Details)
             <section class="witness-panel"
                      data-testid="envelope-details">
                 <h2>Document and message</h2>
@@ -56,9 +55,7 @@
                     </form>
                 </details>
             </section>
-            @break
-
-        @case (\App\Enums\EnvelopeSteps::Signers)
+    @elseif ($currentStep === \App\Enums\EnvelopeSteps::Signers)
             <section class="witness-panel"
                      data-testid="signer-editor">
                 <h2>Who needs to sign?</h2>
@@ -92,9 +89,7 @@
                     </div>
                 </form>
             </section>
-            @break
-
-        @case (\App\Enums\EnvelopeSteps::Fields)
+    @elseif ($currentStep === \App\Enums\EnvelopeSteps::Fields)
             <section class="witness-panel witness-panel-wide"
                      data-testid="field-placement">
                 <h2>Place fields</h2>
@@ -151,9 +146,7 @@
                 </form>
                 @endif
             </section>
-            @break
-
-        @default
+    @else
             <section class="witness-panel witness-review"
                      data-testid="envelope-review">
                 <h2>Review and send</h2>
@@ -188,5 +181,5 @@
                     </form>
                 </details>
             </section>
-    @endswitch
+    @endif
 </div>
